@@ -1,10 +1,10 @@
-# Codex HUDs 开源发布说明 / Open-source release notes
+# Codex DX HUD 开源发布说明 / Open-source release notes
 
 ## 中文说明
 
 ### 项目定位
 
-`daxian-w/codex-huds` 是基于 [D1NOOO/codex-usage-monitor](https://github.com/D1NOOO/codex-usage-monitor) 的二次开发版本。原项目及本项目均采用 MIT License；原作者版权与许可证保留在仓库中。本项目是社区工具，不是 OpenAI 官方产品，也不代表 OpenAI。
+`daxian-w/codex-dx-hud` 是基于 [D1NOOO/codex-usage-monitor](https://github.com/D1NOOO/codex-usage-monitor) 的二次开发版本。原项目及本项目均采用 MIT License；原作者版权与许可证保留在仓库中。本项目是社区工具，不是 OpenAI 官方产品，也不代表 OpenAI。
 
 ### 本次新增与改造
 
@@ -44,7 +44,7 @@
 
 ### Project position
 
-`daxian-w/codex-huds` is a derivative project based on [D1NOOO/codex-usage-monitor](https://github.com/D1NOOO/codex-usage-monitor). The upstream project and this repository use the MIT License; the original attribution and license are retained. This is an unofficial community utility and is not an OpenAI product.
+`daxian-w/codex-dx-hud` is a derivative project based on [D1NOOO/codex-usage-monitor](https://github.com/D1NOOO/codex-usage-monitor). The upstream project and this repository use the MIT License; the original attribution and license are retained. This is an unofficial community utility and is not an OpenAI product.
 
 ### What was added
 

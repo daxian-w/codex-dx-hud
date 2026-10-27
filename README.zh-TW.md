@@ -2,7 +2,7 @@
   <img src="assets/logo.png" alt="Codex 用量監視器專案圖示" width="180">
 </p>
 
-# Codex 用量監視器（Windows）
+# Codex DX HUD（Windows）
 
 [简体中文](README.zh-CN.md) · **繁體中文** · [English](README.md)
 
@@ -12,7 +12,7 @@
 
 ## 原始專案與二次開發說明
 
-本儲存庫是基於原始專案 [D1NOOO/codex-usage-monitor](https://github.com/D1NOOO/codex-usage-monitor) 的二次開發版本。原始專案採用 [MIT License](https://github.com/D1NOOO/codex-usage-monitor/blob/main/LICENSE)，本儲存庫繼續遵守該授權並保留原作者來源說明。`daxian-w/codex-huds` 主要新增奶油玻璃懸浮 HUD、滑鼠展開、尺寸與皮膚選項、任務狀態處理、重置時間顯示、統一設定/通知區域視覺、診斷記錄與回歸測試。完整說明請見[開源發布說明](docs/OPEN-SOURCE-RELEASE.md)。
+本儲存庫是基於原始專案 [D1NOOO/codex-usage-monitor](https://github.com/D1NOOO/codex-usage-monitor) 的二次開發版本。原始專案採用 [MIT License](https://github.com/D1NOOO/codex-usage-monitor/blob/main/LICENSE)，本儲存庫繼續遵守該授權並保留原作者來源說明。`daxian-w/codex-dx-hud` 主要新增奶油玻璃懸浮 HUD、滑鼠展開、尺寸與皮膚選項、任務狀態處理、重置時間顯示、統一設定/通知區域視覺、診斷記錄與回歸測試。完整說明請見[開源發布說明](docs/OPEN-SOURCE-RELEASE.md)。
 
 ## 主要功能
 
@@ -35,7 +35,7 @@
 
 需要 Windows 10/11、.NET Framework 4.8，以及使用 ChatGPT 帳戶登入的 ChatGPT 桌面版、Codex App 或 Codex CLI。API Key 登入不提供訂閱額度。
 
-1. 從 [Releases](https://github.com/daxian-w/codex-huds/releases) 下載 `CodexRateMonitor-VERSION-windows-x64.zip`，使用 `SHA256SUMS.txt` 驗證。
+1. 從 [Releases](https://github.com/daxian-w/codex-dx-hud/releases) 下載 `CodexRateMonitor-VERSION-windows-x64.zip`，使用 `SHA256SUMS.txt` 驗證。
 2. 解壓縮到固定目錄，執行 `CodexRateMonitor.exe`。
 3. 右鍵通知區域圖示開啟選單，雙擊開啟外觀設定；圖示可能位於 `^` 隱藏區域。
 
@@ -82,7 +82,7 @@
 
 ## 設定
 
-常用選項可在外觀設定中調整，其他欄位見[預設設定](https://github.com/daxian-w/codex-huds/blob/main/config/settings.default.json)。
+常用選項可在外觀設定中調整，其他欄位見[預設設定](https://github.com/daxian-w/codex-dx-hud/blob/main/config/settings.default.json)。
 
 | 欄位 | 可選值 / 預設值 |
 |---|---|
@@ -114,12 +114,12 @@
 | 額度為空 / 登入失效 | 使用 ChatGPT 帳戶重新登入，再點擊通知區域選單的「立即重新整理」。 |
 | 浮動列未顯示或位置不正確 | 確認監視器正在執行、吸附目標視窗可見，並在外觀設定中調整位置。 |
 
-仍有問題時，請[提交 issue](https://github.com/daxian-w/codex-huds/issues) 並附上隱藏私人資訊的截圖。
+仍有問題時，請[提交 issue](https://github.com/daxian-w/codex-dx-hud/issues) 並附上隱藏私人資訊的截圖。
 
 ## 建置與發佈
 
 ```powershell
-git clone https://github.com/daxian-w/codex-huds.git
+git clone https://github.com/daxian-w/codex-dx-hud.git
 cd codex-usage-monitor
 .\scripts\verify.ps1
 .\scripts\build.ps1 -Package

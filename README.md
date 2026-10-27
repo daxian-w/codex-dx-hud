@@ -2,7 +2,7 @@
   <img src="assets/logo.png" alt="Codex Rate Monitor logo" width="180">
 </p>
 
-# Codex Rate Monitor for Windows
+# Codex DX HUD for Windows
 
 [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · **English**
 
@@ -12,7 +12,7 @@ A lightweight Windows tray app for Codex quota, reset times and reset credits, w
 
 ## Original project and derivative notice
 
-This repository is a derivative work based on the original [D1NOOO/codex-usage-monitor](https://github.com/D1NOOO/codex-usage-monitor) project. The original project is licensed under the [MIT License](https://github.com/D1NOOO/codex-usage-monitor/blob/main/LICENSE); this repository keeps that license and the original attribution. The `daxian-w/codex-huds` repository adds the glass HUD, hover expansion, size and skin options, task-status handling, reset-time display, unified settings/tray styling, diagnostics and regression tests. See the full [open-source release notes](docs/OPEN-SOURCE-RELEASE.md).
+This repository is a derivative work based on the original [D1NOOO/codex-usage-monitor](https://github.com/D1NOOO/codex-usage-monitor) project. The original project is licensed under the [MIT License](https://github.com/D1NOOO/codex-usage-monitor/blob/main/LICENSE); this repository keeps that license and the original attribution. The `daxian-w/codex-dx-hud` repository adds the glass HUD, hover expansion, size and skin options, task-status handling, reset-time display, unified settings/tray styling, diagnostics and regression tests. See the full [open-source release notes](docs/OPEN-SOURCE-RELEASE.md).
 
 ## Features
 
@@ -35,7 +35,7 @@ Task status uses a partial, read-only view of structured local Codex Desktop act
 
 Requires Windows 10/11 with .NET Framework 4.8 and a ChatGPT-account login through ChatGPT desktop, Codex App or Codex CLI. API-key login does not provide subscription quotas.
 
-1. Download `CodexRateMonitor-VERSION-windows-x64.zip` from [Releases](https://github.com/daxian-w/codex-huds/releases). Use `SHA256SUMS.txt` to verify the archive.
+1. Download `CodexRateMonitor-VERSION-windows-x64.zip` from [Releases](https://github.com/daxian-w/codex-dx-hud/releases). Use `SHA256SUMS.txt` to verify the archive.
 2. Extract to a stable folder and run `CodexRateMonitor.exe`.
 3. Right-click the tray icon for commands, or double-click it for appearance settings. Check the `^` overflow if the icon is hidden.
 
@@ -82,7 +82,7 @@ Data can briefly differ from the official UI. Total app-server traffic includes 
 
 ## Configuration
 
-Most options are available in appearance settings. See the [default settings](https://github.com/daxian-w/codex-huds/blob/main/config/settings.default.json) for all fields.
+Most options are available in appearance settings. See the [default settings](https://github.com/daxian-w/codex-dx-hud/blob/main/config/settings.default.json) for all fields.
 
 | Field | Values / default |
 |---|---|
@@ -114,13 +114,13 @@ Diagnostics are off by default. When enabled, redacted logs in `%LOCALAPPDATA%\C
 | No quota data / login expired | Sign in with a ChatGPT account, then choose **Refresh now** from the tray menu. |
 | Overlay missing or misplaced | Confirm the monitor is running and the attached app window is visible; adjust placement in appearance settings. |
 
-If the problem persists, [open an issue](https://github.com/daxian-w/codex-huds/issues) with a screenshot that excludes private information.
+If the problem persists, [open an issue](https://github.com/daxian-w/codex-dx-hud/issues) with a screenshot that excludes private information.
 
 ## Build and release
 
 ```powershell
-git clone https://github.com/daxian-w/codex-huds.git
-cd codex-huds
+git clone https://github.com/daxian-w/codex-dx-hud.git
+cd codex-dx-hud
 .\scripts\verify.ps1
 .\scripts\build.ps1 -Package
 ```

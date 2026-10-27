@@ -37,9 +37,9 @@ namespace CodexRateMonitorNative
     internal sealed class UpdateChecker : IDisposable
     {
         private const string LatestReleaseApi =
-            "https://api.github.com/repos/daxian-w/codex-huds/releases/latest";
+            "https://api.github.com/repos/daxian-w/codex-dx-hud/releases/latest";
         private const string LatestReleasePage =
-            "https://github.com/daxian-w/codex-huds/releases/latest";
+            "https://github.com/daxian-w/codex-dx-hud/releases/latest";
         private static readonly TimeSpan BackgroundInterval = TimeSpan.FromHours(6);
 
         private readonly string currentVersion;
@@ -202,13 +202,13 @@ namespace CodexRateMonitorNative
                     throw new InvalidDataException("Invalid release version.");
 
                 string packageName = "CodexRateMonitor-" + latestVersion + "-windows-x64.zip";
-                string downloadRoot = "https://github.com/daxian-w/codex-huds/releases/download/" +
+                string downloadRoot = "https://github.com/daxian-w/codex-dx-hud/releases/download/" +
                     Uri.EscapeDataString(tag) + "/";
                 string notes = string.Empty;
                 try
                 {
                     notes = DownloadText(
-                        "https://raw.githubusercontent.com/daxian-w/codex-huds/" +
+                        "https://raw.githubusercontent.com/daxian-w/codex-dx-hud/" +
                         Uri.EscapeDataString(tag) + "/.github/release-notes/" +
                         Uri.EscapeDataString(tag) + ".md",
                         15000);

@@ -2,7 +2,7 @@
   <img src="assets/logo.png" alt="Codex 用量监视器项目图标" width="180">
 </p>
 
-# Codex 用量监视器（Windows）
+# Codex DX HUD（Windows）
 
 **简体中文** · [繁體中文](README.zh-TW.md) · [English](README.md)
 
@@ -12,7 +12,7 @@
 
 ## 原项目与二次开发说明
 
-本仓库是基于原始项目 [D1NOOO/codex-usage-monitor](https://github.com/D1NOOO/codex-usage-monitor) 的二次开发版本。原项目采用 [MIT License](https://github.com/D1NOOO/codex-usage-monitor/blob/main/LICENSE)，本仓库继续遵守该协议并保留原作者来源说明。`daxian-w/codex-huds` 主要新增奶油玻璃悬浮 HUD、悬停展开、尺寸与皮肤选项、任务状态处理、重置时间显示、统一设置/托盘视觉、诊断日志和回归测试。完整说明见[开源发布说明](docs/OPEN-SOURCE-RELEASE.md)。
+本仓库是基于原始项目 [D1NOOO/codex-usage-monitor](https://github.com/D1NOOO/codex-usage-monitor) 的二次开发版本。原项目采用 [MIT License](https://github.com/D1NOOO/codex-usage-monitor/blob/main/LICENSE)，本仓库继续遵守该协议并保留原作者来源说明。`daxian-w/codex-dx-hud` 主要新增奶油玻璃悬浮 HUD、悬停展开、尺寸与皮肤选项、任务状态处理、重置时间显示、统一设置/托盘视觉、诊断日志和回归测试。完整说明见[开源发布说明](docs/OPEN-SOURCE-RELEASE.md)。
 
 ## 主要功能
 
@@ -35,7 +35,7 @@
 
 需要 Windows 10/11、.NET Framework 4.8，以及使用 ChatGPT 账号登录的 ChatGPT 桌面端、Codex App 或 Codex CLI。API Key 登录不提供订阅额度。
 
-1. 从 [Releases](https://github.com/daxian-w/codex-huds/releases) 下载 `CodexRateMonitor-VERSION-windows-x64.zip`，使用 `SHA256SUMS.txt` 校验。
+1. 从 [Releases](https://github.com/daxian-w/codex-dx-hud/releases) 下载 `CodexRateMonitor-VERSION-windows-x64.zip`，使用 `SHA256SUMS.txt` 校验。
 2. 解压到固定目录，运行 `CodexRateMonitor.exe`。
 3. 右键托盘图标打开菜单，双击打开外观设置；图标可能位于 `^` 隐藏区域。
 
@@ -82,7 +82,7 @@
 
 ## 配置
 
-常用选项可在外观设置中调整，其他字段见[默认配置](https://github.com/daxian-w/codex-huds/blob/main/config/settings.default.json)。
+常用选项可在外观设置中调整，其他字段见[默认配置](https://github.com/daxian-w/codex-dx-hud/blob/main/config/settings.default.json)。
 
 | 字段 | 可选值 / 默认值 |
 |---|---|
@@ -114,7 +114,7 @@
 | 额度为空 / 登录失效 | 使用 ChatGPT 账号重新登录，再点击托盘菜单的「立即刷新」。 |
 | 悬浮条未显示或位置不正确 | 确认监视器正在运行、吸附目标窗口可见，并在外观设置中调整位置。 |
 
-仍有问题时，请[提交 issue](https://github.com/daxian-w/codex-huds/issues) 并附上隐藏隐私信息的截图。
+仍有问题时，请[提交 issue](https://github.com/daxian-w/codex-dx-hud/issues) 并附上隐藏隐私信息的截图。
 
 ## 构建与发布
 
