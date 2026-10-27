@@ -140,6 +140,13 @@ namespace CodexRateMonitorNative
                             Pixels(item.Bounds.X, dpi), Pixels(item.Bounds.Y, dpi),
                             Pixels(item.Bounds.Width, dpi), Pixels(item.Bounds.Height, dpi));
                     }
+                    else
+                    {
+                        // AutoSize negotiates size, not absolute position.
+                        // Table/flow parents will arrange these again on resume;
+                        // labels directly on a dialog must move with its DPI.
+                        control.Location = new Point(Pixels(item.Bounds.X, dpi), Pixels(item.Bounds.Y, dpi));
+                    }
                     foreach (AbsoluteStyle style in item.AbsoluteStyles)
                         style.Apply(dpi);
                 }

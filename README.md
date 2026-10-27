@@ -18,11 +18,20 @@ A lightweight Windows tray app for Codex quota, reset times and reset credits, w
 - **Reset credits**: Available count and earliest expiry, queried read-only. Credits are never redeemed.
 - **Everyday convenience**: Live appearance preview, three UI languages, start with Windows and verified in-place updates.
 
+## Glass widget preview (0.4.0)
+
+The new cream-glass widget expands on hover and has five sizes, with Compact selected by default. The original desktop strip and click-through attachment remain available. Settings, menus and the update dialog share the new theme.
+
+Task status uses a partial, read-only view of structured local Codex Desktop activity. Unknown data is not displayed as zero; this build does not invent plan progress. Windows 11 and real pointer validation are still pending. See the [guide](docs/orb-guide.md), [capability report](docs/capability-report.md) and [acceptance status](docs/orb-acceptance-report.md) (Chinese).
+
+![Compact widget, sample data](docs/orb-collapsed-sample.png)
+![Expanded widget, sample data](docs/orb-expanded-sample.png)
+
 ## Install and use
 
 Requires Windows 10/11 with .NET Framework 4.8 and a ChatGPT-account login through ChatGPT desktop, Codex App or Codex CLI. API-key login does not provide subscription quotas.
 
-1. Download `CodexRateMonitor-VERSION-windows-x64.zip` from [Releases](https://github.com/D1NOOO/codex-usage-monitor/releases). Use `SHA256SUMS.txt` to verify the archive.
+1. Download `CodexRateMonitor-VERSION-windows-x64.zip` from [Releases](https://github.com/daxian-w/codex-huds/releases). Use `SHA256SUMS.txt` to verify the archive.
 2. Extract to a stable folder and run `CodexRateMonitor.exe`.
 3. Right-click the tray icon for commands, or double-click it for appearance settings. Check the `^` overflow if the icon is hidden.
 
@@ -69,7 +78,7 @@ Data can briefly differ from the official UI. Total app-server traffic includes 
 
 ## Configuration
 
-Most options are available in appearance settings. See the [default settings](https://github.com/D1NOOO/codex-usage-monitor/blob/main/config/settings.default.json) for all fields.
+Most options are available in appearance settings. See the [default settings](https://github.com/daxian-w/codex-huds/blob/main/config/settings.default.json) for all fields.
 
 | Field | Values / default |
 |---|---|
@@ -101,13 +110,13 @@ Diagnostics are off by default. When enabled, redacted logs in `%LOCALAPPDATA%\C
 | No quota data / login expired | Sign in with a ChatGPT account, then choose **Refresh now** from the tray menu. |
 | Overlay missing or misplaced | Confirm the monitor is running and the attached app window is visible; adjust placement in appearance settings. |
 
-If the problem persists, [open an issue](https://github.com/D1NOOO/codex-usage-monitor/issues) with a screenshot that excludes private information.
+If the problem persists, [open an issue](https://github.com/daxian-w/codex-huds/issues) with a screenshot that excludes private information.
 
 ## Build and release
 
 ```powershell
-git clone https://github.com/D1NOOO/codex-usage-monitor.git
-cd codex-usage-monitor
+git clone https://github.com/daxian-w/codex-huds.git
+cd codex-huds
 .\scripts\verify.ps1
 .\scripts\build.ps1 -Package
 ```

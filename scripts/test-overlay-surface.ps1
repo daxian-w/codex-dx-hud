@@ -26,6 +26,7 @@ internal static class OverlaySurfaceSmoke
 {
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("dwmapi.dll")] private static extern int DwmFlush();
     private static Exception nativeError;
     private static object Get(object instance, string name) { return instance.GetType().GetProperty(name).GetValue(instance, null); }
     private static void Set(object instance, string name, object value) { instance.GetType().GetProperty(name).SetValue(instance, value, null); }
@@ -82,6 +83,7 @@ internal static class OverlaySurfaceSmoke
         Application.DoEvents();
         Thread.Sleep(80);
         Application.DoEvents();
+        DwmFlush();
         Check(true, "message pump failed");
     }
     private static void CheckComposition(Bitmap surface, Bitmap screen, Point origin, Color background, double opacity)
@@ -180,6 +182,11 @@ internal static class OverlaySurfaceSmoke
                         {
                             using (Graphics graphics = Graphics.FromImage(screenshot))
                                 graphics.CopyFromScreen(backdrop.Location, Point.Empty, backdrop.Size);
+                            Color capturedBackdrop = screenshot.GetPixel(5, 5);
+                            Check(capturedBackdrop.ToArgb() == backdrop.BackColor.ToArgb(),
+                                "desktop capture did not contain the test backdrop: captured=" + capturedBackdrop +
+                                " expected=" + backdrop.BackColor + " backdrop=" + backdrop.Bounds +
+                                " visible=" + backdrop.Visible + " overlay=" + overlay.Bounds);
                             CheckComposition(bitmap, screenshot, new Point(30, 30), backdrop.BackColor, opacity);
                             if (!string.IsNullOrEmpty(captures) && opacity == 0.97)
                                 screenshot.Save(Path.Combine(captures, darkSurface ? "rounded-dark-desktop.png" : "rounded-light-desktop.png"));

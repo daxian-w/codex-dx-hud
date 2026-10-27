@@ -24,20 +24,36 @@ namespace CodexRateMonitorNative
             if (UpdateInstaller.TryHandleCommandLine(args))
                 return;
 
+            // Explicit development mode isolates only the instance mutex. Normal
+            // launches remain single-instance; runtime files stay in this EXE's directory.
+            bool developmentInstance = args != null && args.Any(delegate(string value) { return value == "--development-instance"; });
+            string mutexName = @"Local\CodexRateMonitorNative";
+            if (developmentInstance)
+            {
+                using (SHA256 hash = SHA256.Create())
+                    mutexName += ".Dev." + BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(
+                        AppDomain.CurrentDomain.BaseDirectory.ToLowerInvariant()))).Replace("-", "").Substring(0, 16);
+            }
+            bool showSettings = args != null && args.Any(delegate(string value)
+            { return string.Equals(value, "--settings", StringComparison.OrdinalIgnoreCase); });
+            if (developmentInstance && args.Any(delegate(string value) { return value == "--shutdown-development"; }))
+            {
+                Environment.ExitCode = InstanceSignals.Send(mutexName, "Exit") ? 0 : 1;
+                return;
+            }
             bool created;
-            using (var mutex = new Mutex(true, @"Local\CodexRateMonitorNative", out created))
+            using (var mutex = new Mutex(true, mutexName, out created))
             {
                 if (!created)
+                {
+                    if (showSettings) Environment.ExitCode = InstanceSignals.Send(mutexName, "Settings") ? 0 : 1;
                     return;
+                }
 
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
-                bool showSettings = args != null &&
-                    args.Any(delegate(string value)
-                    {
-                        return string.Equals(value, "--settings", StringComparison.OrdinalIgnoreCase);
-                    });
                 using (var context = new MonitorContext(showSettings))
+                using (var signals = new InstanceSignals(mutexName, context, developmentInstance))
                     Application.Run(context);
             }
         }
@@ -56,11 +72,13 @@ namespace CodexRateMonitorNative
         private readonly AppServerClient appServer;
         private readonly RateSnapshotStabilizer snapshotStabilizer;
         private readonly UsageRefreshScheduler refreshScheduler = new UsageRefreshScheduler();
+        private readonly TaskStatusProvider taskProvider = new TaskStatusProvider(TaskStatusProvider.DefaultRoot);
         private readonly UpdateChecker updateChecker;
         private ToolStripMenuItem startupItem;
         private ToolStripMenuItem updateItem;
         private ToolStripMenuItem desktopModeItem;
         private ToolStripMenuItem attachModeItem;
+        private ToolStripMenuItem orbModeItem;
         private ContextMenuStrip trayMenu;
         private MonitorSettings settings;
         private AppearanceSettingsForm appearanceForm;
@@ -71,6 +89,7 @@ namespace CodexRateMonitorNative
         private ResetCreditsInfo resetCredits;
         private DateTime lastCreditsCheck = DateTime.MinValue;
         private bool creditsFetchInFlight;
+        private bool creditsRefreshFailed;
         private System.Windows.Forms.Timer trayTextRestoreTimer;
         private DateTime lastSnapshotAt = DateTime.MinValue;
         private double lastSnapshotMonotonic;
@@ -80,6 +99,7 @@ namespace CodexRateMonitorNative
         private int completedReadId;
         private int accountEpoch;
         private string accountFingerprint;
+        private string lastTaskAccountFingerprint;
         private IntPtr desktopWindow;
         private double nextWindowCheck;
         private double nextStartAttempt;
@@ -104,7 +124,7 @@ namespace CodexRateMonitorNative
         private bool authDead;
         private DateTime authAttemptAt = DateTime.MinValue;
         private int authReadFloor;
-        private bool disposed;
+        private volatile bool disposed;
 
         public MonitorContext(bool showSettings)
         {
@@ -116,6 +136,14 @@ namespace CodexRateMonitorNative
             I18n.SetLanguage(settings.Language);
             overlay = new OverlayForm(settings);
             overlay.DesktopLayoutChanged += OnDesktopLayoutChanged;
+            overlay.OrbLayoutChanged += delegate(OrbPosition position)
+            {
+                if (appearanceForm != null && !appearanceForm.IsDisposed) { appearanceForm.SetPreviewOrbPosition(position); return; }
+                settings.Orb.Position = position.Clone();
+                settings.Save();
+            };
+            overlay.OrbSettingsRequested += delegate { ShowAppearanceSettings(); appearanceForm.FocusOrbSettings(); };
+            taskProvider.SnapshotReceived += OnTaskSnapshotReceived;
             IntPtr ignored = overlay.Handle;
 
             appServer = new AppServerClient();
@@ -139,6 +167,7 @@ namespace CodexRateMonitorNative
             trayIcon.Text = I18n.T("AppTitle");
             trayMenu = BuildTrayMenu();
             trayIcon.ContextMenuStrip = trayMenu;
+            overlay.ContextMenuStrip = trayMenu;
             trayIcon.Visible = true;
             trayIcon.DoubleClick += delegate { ShowAppearanceSettings(); };
 
@@ -179,11 +208,17 @@ namespace CodexRateMonitorNative
 
             if (showSettings)
                 ShowAppearanceSettings();
+            if (!string.IsNullOrEmpty(MonitorSettings.LoadWarning))
+                MessageBox.Show(I18n.T("SettingsLoadFailed"), I18n.T("SettingsTitle"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
         private ContextMenuStrip BuildTrayMenu()
         {
             var menu = new ContextMenuStrip();
+            menu.Renderer = new CreamMenuRenderer();
+            menu.Closed += delegate { overlay.ResumeOrbAfterMenu(); };
+            menu.Padding = new Padding(5, 7, 5, 7);
             menu.Items.Add(I18n.T("AppearanceMenu"), null, delegate { ShowAppearanceSettings(); });
             menu.Items.Add(I18n.T("RefreshNow"), null, delegate { RefreshNow(); });
             updateItem = new ToolStripMenuItem(UpdateMenuText());
@@ -192,13 +227,53 @@ namespace CodexRateMonitorNative
             menu.Items.Add(I18n.T("ReloadStyle"), null, delegate { ReloadSettings(); });
             menu.Items.Add(new ToolStripSeparator());
             desktopModeItem = new ToolStripMenuItem(I18n.T("DesktopFloatingMode"));
-            desktopModeItem.Checked = settings.OverlayMode == "desktop";
+            desktopModeItem.Checked = settings.OverlayMode == "desktop" && settings.DesktopWidgetStyle != "orb";
             desktopModeItem.Click += delegate { SetOverlayMode("desktop"); };
             menu.Items.Add(desktopModeItem);
             attachModeItem = new ToolStripMenuItem(I18n.T("WindowAttachMode"));
             attachModeItem.Checked = settings.OverlayMode == "attach";
             attachModeItem.Click += delegate { SetOverlayMode("attach"); };
             menu.Items.Add(attachModeItem);
+            orbModeItem = new ToolStripMenuItem(I18n.T("OrbMode"));
+            orbModeItem.Checked = settings.OverlayMode == "desktop" && settings.DesktopWidgetStyle == "orb";
+            orbModeItem.Click += delegate { SetOverlayMode("orb"); };
+            menu.Items.Add(orbModeItem);
+            var sizes = new ToolStripMenuItem(I18n.T("OrbSize"));
+            string[] presets = { "tiny", "small", "mini", "compact", "standard", "large", "extraLarge" };
+            string[] names = { "OrbTiny", "OrbSmall", "OrbMini", "OrbCompact", "OrbStandard", "OrbLarge", "OrbExtraLarge" };
+            for (int i = 0; i < presets.Length; i++)
+            {
+                string preset = presets[i];
+                var item = new ToolStripMenuItem(I18n.T(names[i]));
+                item.Checked = settings.Orb.SizePreset == preset;
+                item.Click += delegate
+                {
+                    settings.Orb.SizePreset = preset;
+                    settings.Save();
+                    overlay.ApplySettings(settings);
+                    RefreshTrayLanguage();
+                };
+                sizes.DropDownItems.Add(item);
+            }
+            menu.Items.Add(sizes);
+            var skins = new ToolStripMenuItem(I18n.T("OrbSkin"));
+            string[] skinIds = { "cream", "glacier", "lavender" };
+            string[] skinNames = { "OrbSkinCream", "OrbSkinGlacier", "OrbSkinLavender" };
+            for (int i = 0; i < skinIds.Length; i++)
+            {
+                string skin = skinIds[i];
+                var item = new ToolStripMenuItem(I18n.T(skinNames[i]));
+                item.Checked = settings.Orb.Skin == skin;
+                item.Click += delegate
+                {
+                    settings.Orb.Skin = skin;
+                    settings.Save();
+                    overlay.ApplySettings(settings);
+                    RefreshTrayLanguage();
+                };
+                skins.DropDownItems.Add(item);
+            }
+            menu.Items.Add(skins);
             menu.Items.Add(new ToolStripSeparator());
             startupItem = new ToolStripMenuItem(I18n.T("Startup"));
             startupItem.Checked = IsStartupEnabled();
@@ -214,6 +289,7 @@ namespace CodexRateMonitorNative
             ContextMenuStrip old = trayMenu;
             trayMenu = BuildTrayMenu();
             trayIcon.ContextMenuStrip = trayMenu;
+            overlay.ContextMenuStrip = trayMenu;
             trayIcon.Text = I18n.T("AppTitle");
             RefreshUpdateIndicators();
             if (old != null)
@@ -225,6 +301,7 @@ namespace CodexRateMonitorNative
             if (appearanceForm != null && !appearanceForm.IsDisposed)
                 appearanceForm.SetPreviewDpi(overlay.OverlayDpi);
             DiagnosticLog.CleanupIfDue();
+            if (overlay.OrbTaskMonitoringEnabled && !authDead) taskProvider.Poll(overlay.OrbExpanded);
             if (authResyncAttempted && !authDead &&
                 (DateTime.Now - authAttemptAt).TotalSeconds >= AuthRecoveryTimeoutSeconds)
             {
@@ -454,14 +531,29 @@ namespace CodexRateMonitorNative
             });
         }
 
-        private void ClearAccountData(string status)
+        private void OnTaskSnapshotReceived(TaskSnapshot observed)
+        {
+            Ui(delegate
+            {
+                if (observed.AccountEpoch != accountEpoch || authDead || authFailures > 0 ||
+                    authResyncAttempted || accountFingerprint == null) return;
+                overlay.SetTaskSnapshot(observed);
+                UpdateTrayText();
+            });
+        }
+
+        private void ClearAccountData(string status, bool discardEarlierTasks = true)
         {
             accountEpoch++;
+            if (taskProvider != null) taskProvider.Reset(accountEpoch, discardEarlierTasks);
+            overlay.SetTaskSnapshot(discardEarlierTasks ? new TaskSnapshot { AccountEpoch = accountEpoch } :
+                new TaskSnapshot { AccountEpoch = accountEpoch, State = "loading", Coverage = "partial", ErrorCode = "account-verifying" });
             lastSnapshot = null;
             lastSnapshotAt = DateTime.MinValue;
             lastSnapshotMonotonic = 0;
             refreshScheduler.ClearResetTargets();
             resetCredits = null;
+            creditsRefreshFailed = false;
             lastCreditsCheck = DateTime.MinValue;
             identicalReads = 0;
             completedReadId = 0;
@@ -470,6 +562,7 @@ namespace CodexRateMonitorNative
             if (appearanceForm != null && !appearanceForm.IsDisposed)
                 appearanceForm.SetUsageSnapshot(null);
             overlay.SetResetCredits(null);
+            overlay.SetOrbDataState(status == I18n.T("Connecting") ? "loading" : "error", "loading");
             overlay.SetUsageHint(status);
             trayIcon.Text = SafeTrayText(I18n.F("TrayStatus", status));
         }
@@ -480,7 +573,10 @@ namespace CodexRateMonitorNative
             {
                 if (generation != appServer.Generation) return;
                 accountFingerprint = null;
-                ClearAccountData(I18n.T("Connecting"));
+                // Notifications can also be emitted for the same account at startup.
+                // Hide data immediately; decide whether history must be discarded only
+                // after a current account/read response has verified the identity.
+                ClearAccountData(I18n.T("Connecting"), false);
                 authReadFloor = appServer.LatestRequestId;
                 authDead = false;
                 authFailures = 0;
@@ -500,8 +596,10 @@ namespace CodexRateMonitorNative
                     refreshScheduler.PendingGeneration != generation)) return;
                 if (accountFingerprint != account.Fingerprint)
                 {
-                    ClearAccountData(I18n.T("Connecting"));
+                    bool changed = lastTaskAccountFingerprint != null && lastTaskAccountFingerprint != account.Fingerprint;
+                    ClearAccountData(I18n.T("Connecting"), changed || !account.CanReadQuota);
                     accountFingerprint = account.Fingerprint;
+                    if (account.CanReadQuota) lastTaskAccountFingerprint = account.Fingerprint;
                     DiagnosticLog.Write("account-changed", "source=read");
                 }
                 if (!account.CanReadQuota)
@@ -649,6 +747,9 @@ namespace CodexRateMonitorNative
         // tooltip can additionally show full credit details and failure state.
         private void UpdateTrayText()
         {
+            string health = authDead || authFailures > 0 ? "error" : lastSnapshot == null ? "loading" : refreshFailed ? "cached" : "live";
+            string creditState = creditsRefreshFailed ? resetCredits == null ? "error" : "cached" : resetCredits == null ? "loading" : "live";
+            overlay.SetOrbDataState(health, creditState);
             if (authFailures > 0 || authResyncAttempted || authDead)
                 return;
             if (lastSnapshot == null)
@@ -665,6 +766,7 @@ namespace CodexRateMonitorNative
             int interval = UsageRefreshScheduler.Interval(lastUsageState,
                 settings.ForegroundRefreshSeconds, settings.RefreshSeconds, settings.MinimizedRefreshSeconds);
             bool stale = cacheAge > Math.Max(120, interval * 2 + 30);
+            if (stale) overlay.SetOrbDataState("cached", creditState);
             string hint = text + "\n" + updated;
             if (refreshFailed) hint += "\n" + I18n.T("RefreshFailedCached");
             else if (stale) hint += "\n" + I18n.T("CachedDataStale");
@@ -677,6 +779,7 @@ namespace CodexRateMonitorNative
                     resetCredits.AvailableCount.ToString(CultureInfo.InvariantCulture),
                     resetCredits.FormatEarliestExpiry());
             }
+            if (overlay.OrbTaskMonitoringEnabled) hint += "\n" + overlay.TaskUsageHint();
             overlay.SetUsageHint(hint);
             // The compact form works in all three languages without truncating
             // the update time. Failure remains visible even in attach mode.
@@ -708,7 +811,8 @@ namespace CodexRateMonitorNative
                     creditsFetchInFlight = false;
                     if (startedEpoch != accountEpoch)
                         return;
-                    resetCredits = info;
+                    creditsRefreshFailed = info == null;
+                    if (info != null) resetCredits = info;
                     // On failure retry soon (60s) instead of waiting a full
                     // cycle; the backend is auxiliary so this stays quiet.
                     lastCreditsCheck = info == null
@@ -734,7 +838,7 @@ namespace CodexRateMonitorNative
                     authFailures.ToString(CultureInfo.InvariantCulture));
                 if (authFailures == 1)
                 {
-                    ClearAccountData(I18n.T("Connecting"));
+                    ClearAccountData(I18n.T("Connecting"), false);
                 }
                 if (authResyncAttempted)
                 {
@@ -771,7 +875,7 @@ namespace CodexRateMonitorNative
             authDead = true;
             authProbeNotBefore = NowSeconds + AuthProbeSeconds;
             string status = I18n.T("AuthUnavailable");
-            ClearAccountData(status);
+            ClearAccountData(status, false);
             refreshScheduler.Trigger(NowSeconds, AuthProbeSeconds, "auth_probe");
             DiagnosticLog.Write("auth-dead", null);
         }
@@ -949,17 +1053,29 @@ namespace CodexRateMonitorNative
 
         private void Ui(Action action)
         {
-            if (disposed)
+            if (disposed || overlay.IsDisposed || !overlay.IsHandleCreated)
                 return;
+            Action guarded = delegate
+            {
+                // A callback queued before Exit can execute after Dispose has
+                // already released tray icons, forms and data providers.
+                if (!disposed && !overlay.IsDisposed && overlay.IsHandleCreated) action();
+            };
             try
             {
                 if (overlay.InvokeRequired)
-                    overlay.BeginInvoke(action);
+                    overlay.BeginInvoke(guarded);
                 else
-                    action();
+                    guarded();
             }
             catch (ObjectDisposedException)
             {
+            }
+            catch (InvalidOperationException)
+            {
+                // Handle destruction can race BeginInvoke. Preserve real
+                // application errors when the target is still alive.
+                if (!disposed && !overlay.IsDisposed && overlay.IsHandleCreated) throw;
             }
         }
 
@@ -995,12 +1111,15 @@ namespace CodexRateMonitorNative
 
         private void SetOverlayMode(string mode)
         {
+            if (mode == "orb") { mode = "desktop"; settings.DesktopWidgetStyle = "orb"; }
+            else if (mode == "desktop") settings.DesktopWidgetStyle = "strip";
             settings.SelectPlacement(mode, settings.Position);
             settings.Save();
             if (desktopModeItem != null)
-                desktopModeItem.Checked = mode == "desktop";
+                desktopModeItem.Checked = mode == "desktop" && settings.DesktopWidgetStyle != "orb";
             if (attachModeItem != null)
                 attachModeItem.Checked = mode == "attach";
+            if (orbModeItem != null) orbModeItem.Checked = mode == "desktop" && settings.DesktopWidgetStyle == "orb";
             overlay.ApplySettings(settings);
             if (mode == "desktop")
                 overlay.ShowDesktop();
@@ -1010,6 +1129,7 @@ namespace CodexRateMonitorNative
 
         private void OnDesktopLayoutChanged(int x, int y)
         {
+            if (appearanceForm != null && !appearanceForm.IsDisposed) { appearanceForm.SetPreviewStripPosition(x, y); return; }
             settings.DesktopX = x;
             settings.DesktopY = y;
             settings.Save();
@@ -1037,6 +1157,8 @@ namespace CodexRateMonitorNative
             }
 
             MonitorSettings original = settings.Clone();
+            Point originalDesktopLocation = overlay.Location;
+            overlay.SetOrbSettingsOpen(true);
             appearanceForm = new AppearanceSettingsForm(
                 settings.Clone(),
                 delegate(MonitorSettings preview)
@@ -1045,12 +1167,12 @@ namespace CodexRateMonitorNative
                 },
                 delegate(MonitorSettings saved)
                 {
+                    saved.SaveTo(MonitorSettings.SettingsPath);
                     settings = saved.Clone();
                     DiagnosticLog.Configure(
                         settings.DiagnosticsEnabled,
                         settings.DiagnosticRetentionDays);
                     I18n.SetLanguage(settings.Language);
-                    settings.Save();
                     RefreshTrayLanguage();
                     overlay.ApplySettings(settings);
                     UpdateTrayText();
@@ -1059,8 +1181,9 @@ namespace CodexRateMonitorNative
                 delegate
                 {
                     overlay.ApplySettings(original);
+                    overlay.RestoreDesktopPreviewLocation(originalDesktopLocation);
                 });
-            appearanceForm.FormClosed += delegate { appearanceForm = null; };
+            appearanceForm.FormClosed += delegate { appearanceForm = null; overlay.SetOrbSettingsOpen(false); };
             appearanceForm.SetUsageSnapshot(lastSnapshot);
             appearanceForm.SetPreviewDpi(overlay.OverlayDpi);
             appearanceForm.Show();
@@ -1099,6 +1222,8 @@ namespace CodexRateMonitorNative
             Dispose();
             ExitThread();
         }
+        public void RequestSettings() { Ui(ShowAppearanceSettings); }
+        public void RequestDevelopmentExit() { Ui(ExitMonitor); }
 
         protected override void ExitThreadCore()
         {
@@ -1135,12 +1260,13 @@ namespace CodexRateMonitorNative
             if (updateForm != null && !updateForm.IsDisposed)
                 updateForm.Close();
             appServer.Dispose();
+            taskProvider.Dispose();
             overlay.Close();
             overlay.Dispose();
         }
     }
 
-    internal sealed class OverlayForm : Form
+    internal sealed partial class OverlayForm : Form
     {
         private readonly ToolTip usageHint = new ToolTip { ShowAlways = true, AutoPopDelay = 10000 };
         private MonitorSettings settings;
@@ -1158,6 +1284,10 @@ namespace CodexRateMonitorNative
         private bool creatingSurfaceHandle;
         private readonly FullscreenVisibility fullscreenVisibility = new FullscreenVisibility();
         private bool desktopLocationInitialized;
+        private string lastAppliedWidgetStyle = "strip";
+        private int lastAppliedDesktopX;
+        private int lastAppliedDesktopY;
+        private OrbPosition lastAppliedOrbPosition;
 
         public int OverlayDpi { get { return overlayDpi; } }
 
@@ -1168,7 +1298,7 @@ namespace CodexRateMonitorNative
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) usageHint.Dispose();
+            if (disposing) { usageHint.Dispose(); DisposeOrb(); }
             base.Dispose(disposing);
         }
 
@@ -1180,6 +1310,8 @@ namespace CodexRateMonitorNative
         public OverlayForm(MonitorSettings initialSettings)
         {
             settings = initialSettings;
+            InitializeOrb();
+            Text = "Codex Rate Monitor";
             // Custom painting owns scaling; WinForms must not scale it again.
             AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.None;
@@ -1223,10 +1355,33 @@ namespace CodexRateMonitorNative
 
         public void ApplySettings(MonitorSettings value)
         {
+            bool oldOrb = settings != null && overlayMode == "desktop" && settings.DesktopWidgetStyle == "orb";
             settings = value;
             string newMode = string.IsNullOrEmpty(value.OverlayMode) ? "desktop" : value.OverlayMode;
             bool modeChanged = overlayMode != newMode;
             overlayMode = newMode;
+            OrbPosition requestedOrbPosition = value.Orb.Position;
+            bool orbPositionChanged = lastAppliedOrbPosition == null ||
+                requestedOrbPosition.HasSavedPosition != lastAppliedOrbPosition.HasSavedPosition ||
+                requestedOrbPosition.MonitorId != lastAppliedOrbPosition.MonitorId ||
+                requestedOrbPosition.OffsetXDip != lastAppliedOrbPosition.OffsetXDip ||
+                requestedOrbPosition.OffsetYDip != lastAppliedOrbPosition.OffsetYDip;
+            bool preserveOrbAnchor = !modeChanged && lastAppliedWidgetStyle == value.DesktopWidgetStyle && !orbPositionChanged;
+            bool savedStripLocationChanged = (value.DesktopX != 0 || value.DesktopY != 0) &&
+                (lastAppliedDesktopX != value.DesktopX || lastAppliedDesktopY != value.DesktopY);
+            if (lastAppliedWidgetStyle != value.DesktopWidgetStyle || savedStripLocationChanged)
+                desktopLocationInitialized = false;
+            lastAppliedWidgetStyle = value.DesktopWidgetStyle;
+            lastAppliedDesktopX = value.DesktopX;
+            lastAppliedDesktopY = value.DesktopY;
+            if (oldOrb || IsOrb)
+            {
+                Point existingAnchor = orbAnchor;
+                bool existingInitialized = orbAnchorInitialized;
+                ResetOrb();
+                if (preserveOrbAnchor) { orbAnchor = existingAnchor; orbAnchorInitialized = existingInitialized; }
+            }
+            lastAppliedOrbPosition = requestedOrbPosition.Clone();
 
             BackColor = ColorTools.Parse(settings.Style.Background);
 
@@ -1257,6 +1412,7 @@ namespace CodexRateMonitorNative
 
         private void UpdateOverlaySize()
         {
+            if (IsOrb) { UpdateOrbBounds(); return; }
             Size pixels = OverlayRenderer.GetSnapshotPixelSize(settings, snapshot, ShowCreditsBadge, overlayDpi);
             if (Size != pixels)
             {
@@ -1437,6 +1593,7 @@ namespace CodexRateMonitorNative
             {
                 // Hide natively too: ShowWindow/SetWindowPos can leave the
                 // managed Visible flag false while the HWND is still visible.
+                CollapseOrbForHide();
                 if (NativeMethods.IsWindowVisible(Handle))
                     NativeMethods.ShowWindow(Handle, 0);
                 return;
@@ -1456,6 +1613,7 @@ namespace CodexRateMonitorNative
                 Stopwatch.GetTimestamp());
             if (fullscreenVisibility.Suppressed)
             {
+                CollapseOrbForHide();
                 NativeMethods.ShowWindow(Handle, 0);
                 return;
             }
@@ -1467,6 +1625,7 @@ namespace CodexRateMonitorNative
 
         private void PrepareDesktopLocation()
         {
+            if (IsOrb) { UpdateOrbBounds(); return; }
             if (desktopLocationInitialized)
             {
                 // Display removal/resolution changes may invalidate the old
@@ -1511,6 +1670,13 @@ namespace CodexRateMonitorNative
             var handler = DesktopLayoutChanged;
             if (handler != null)
                 handler(Location.X, Location.Y);
+        }
+        public void RestoreDesktopPreviewLocation(Point location)
+        {
+            if (overlayMode != "desktop" || IsOrb) return;
+            Location = ClampLocationToScreen(location);
+            desktopLocationInitialized = true;
+            RefreshSurface();
         }
 
         private Point ResolveDesktopLocation()
@@ -1575,6 +1741,7 @@ namespace CodexRateMonitorNative
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
+            if (IsOrb) { OrbMouseDown(e); return; }
             if (overlayMode != "desktop")
                 return;
             // The whole overlay is draggable in desktop mode (no pin button).
@@ -1588,6 +1755,7 @@ namespace CodexRateMonitorNative
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
+            if (IsOrb) { OrbMouseMove(e); return; }
             if (overlayMode != "desktop")
                 return;
             Cursor = Cursors.SizeAll;
@@ -1604,6 +1772,7 @@ namespace CodexRateMonitorNative
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+            if (IsOrb) { OrbMouseUp(e); return; }
             if (overlayMode != "desktop")
                 return;
             if (dragging)
@@ -1621,6 +1790,11 @@ namespace CodexRateMonitorNative
             presentingSurface = true;
             try
             {
+                if (IsOrb)
+                {
+                    using (Bitmap bitmap = CreateOrbSurface()) LayeredWindowSurface.Present(Handle, bitmap, 1);
+                    return;
+                }
                 using (Bitmap bitmap = OverlayRenderer.CreateBitmap(settings, snapshot,
                     resetCredits, status, overlayDpi))
                     LayeredWindowSurface.Present(Handle, bitmap, settings.Style.Opacity);
@@ -1631,6 +1805,11 @@ namespace CodexRateMonitorNative
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
+            if (IsOrb)
+            {
+                using (Bitmap bitmap = CreateOrbSurface()) e.Graphics.DrawImageUnscaled(bitmap, 0, 0);
+                return;
+            }
             OverlayRenderer.Paint(e.Graphics, settings, snapshot, resetCredits, status, overlayDpi);
         }
     }
@@ -2884,6 +3063,11 @@ namespace CodexRateMonitorNative
 
     internal sealed class MonitorSettings
     {
+        public int SettingsSchemaVersion { get; set; }
+        public string DesktopWidgetStyle { get; set; }
+        public OrbSettings Orb { get; set; }
+        public static string LoadWarning { get; private set; }
+        private static bool preserveCorruptFile;
         public string Language { get; set; }
         public string Position { get; set; }
         public string UsageDisplay { get; set; }
@@ -2917,6 +3101,9 @@ namespace CodexRateMonitorNative
 
         public MonitorSettings()
         {
+            SettingsSchemaVersion = 2;
+            DesktopWidgetStyle = "strip";
+            Orb = new OrbSettings();
             Language = "auto";
             Position = "top";
             DisplayLines = "1";
@@ -2940,6 +3127,7 @@ namespace CodexRateMonitorNative
 
         public static MonitorSettings Load()
         {
+            LoadWarning = null;
             MonitorSettings result = new MonitorSettings();
             if (!File.Exists(SettingsPath))
                 return result;
@@ -2948,8 +3136,10 @@ namespace CodexRateMonitorNative
                 string text = File.ReadAllText(SettingsPath, Encoding.UTF8);
                 result = Parse(text);
             }
-            catch
+            catch (Exception ex)
             {
+                preserveCorruptFile = true;
+                LoadWarning = ex.GetType().Name;
             }
             result.Normalize();
             return result;
@@ -2960,7 +3150,14 @@ namespace CodexRateMonitorNative
             var serializer = new JavaScriptSerializer();
             var root = serializer.DeserializeObject(text) as Dictionary<string, object>;
             if (root == null) throw new FormatException("Settings must be a JSON object.");
-            var result = serializer.Deserialize<MonitorSettings>(text) ?? new MonitorSettings();
+            var compatibleRoot = new Dictionary<string, object>(root, StringComparer.OrdinalIgnoreCase);
+            object rawOrb = FindProperty(root, "Orb");
+            compatibleRoot.Remove("Orb");
+            compatibleRoot.Remove("DesktopWidgetStyle");
+            compatibleRoot.Remove("SettingsSchemaVersion");
+            var result = serializer.Deserialize<MonitorSettings>(serializer.Serialize(compatibleRoot)) ?? new MonitorSettings();
+            result.Orb = OrbSettings.Parse(rawOrb as Dictionary<string, object>);
+            result.DesktopWidgetStyle = FindProperty(root, "DesktopWidgetStyle") as string ?? "strip";
             if (!HasProperty(root, "DisplayLines"))
                 result.DisplayLines = result.OverlayMode == "attach" && result.Position == "bottom-right" ? "2" : "1";
             var rawStyle = FindProperty(root, "Style") as Dictionary<string, object>;
@@ -2990,20 +3187,50 @@ namespace CodexRateMonitorNative
 
         public void Save()
         {
+            try { SaveTo(SettingsPath); }
+            catch (Exception ex)
+            {
+                DiagnosticLog.Write("settings-save-failed", "type=" + ex.GetType().Name);
+                MessageBox.Show(I18n.T("SettingsSaveFailed"), I18n.T("SettingsTitle"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        // Throwing form used by the settings dialog, so a failed save keeps it open.
+        internal void SaveTo(string path)
+        {
             Normalize();
+            string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
                 string json = new JavaScriptSerializer().Serialize(this);
-                File.WriteAllText(SettingsPath, json, new UTF8Encoding(false));
+                using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    byte[] bytes = new UTF8Encoding(false).GetBytes(json);
+                    stream.Write(bytes, 0, bytes.Length);
+                    stream.Flush(true);
+                }
+                if (File.Exists(path))
+                {
+                    if (preserveCorruptFile && path == SettingsPath)
+                        File.Copy(path, path + ".corrupt-" + Guid.NewGuid().ToString("N"), false);
+                    File.Replace(temporary, path, path + ".bak", true);
+                }
+                else File.Move(temporary, path);
+                if (path == SettingsPath) preserveCorruptFile = false;
             }
-            catch
+            finally
             {
+                if (File.Exists(temporary)) File.Delete(temporary);
             }
         }
 
         public MonitorSettings Clone()
         {
             var clone = new MonitorSettings();
+            clone.SettingsSchemaVersion = SettingsSchemaVersion;
+            clone.DesktopWidgetStyle = DesktopWidgetStyle;
+            clone.Orb = Orb == null ? new OrbSettings() : Orb.Clone();
             clone.Language = Language;
             clone.Position = Position;
             clone.UsageDisplay = UsageDisplay;
@@ -3035,6 +3262,10 @@ namespace CodexRateMonitorNative
 
         private void Normalize()
         {
+            SettingsSchemaVersion = 2;
+            if (DesktopWidgetStyle != "orb") DesktopWidgetStyle = "strip";
+            if (Orb == null) Orb = new OrbSettings();
+            Orb.Normalize();
             Language = I18n.NormalizeSetting(Language);
             if (Position != "top" && Position != "bottom-right")
                 Position = "top";

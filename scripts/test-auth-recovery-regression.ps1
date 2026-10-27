@@ -114,6 +114,9 @@ internal static class AuthRecoverySmoke
         Type windowType = assembly.GetType("CodexRateMonitorNative.WindowUsage", true);
         object settings = Activator.CreateInstance(settingsType, true);
         object overlay = Activator.CreateInstance(overlayType, new object[] { settings });
+        // MonitorContext creates the overlay HWND before wiring data callbacks.
+        // Match that production precondition for the real Ui dispatch path.
+        object overlayHandle = overlayType.GetProperty("Handle").GetValue(overlay, null);
         try
         {
             object first = Activator.CreateInstance(snapshotType, true);

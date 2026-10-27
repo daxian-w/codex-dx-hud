@@ -9,7 +9,7 @@ using System.Windows.Forms;
 
 namespace CodexRateMonitorNative
 {
-    internal sealed class AppearanceSettingsForm : DpiAwareDialog
+    internal sealed partial class AppearanceSettingsForm : DpiAwareDialog
     {
         private readonly Action<MonitorSettings> onPreview;
         private readonly Action<MonitorSettings> onSave;
@@ -41,6 +41,8 @@ namespace CodexRateMonitorNative
         private decimal lastScaleInput;
         private readonly NumericUpDown opacity;
         private readonly NumericUpDown cornerRadius;
+        private GroupBox stripTypographyGroup;
+        private GroupBox stripColorsGroup;
 
         public AppearanceSettingsForm(
             MonitorSettings initial,
@@ -49,6 +51,7 @@ namespace CodexRateMonitorNative
             Action cancelCallback)
         {
             working = initial.Clone();
+            loading = true;
             onPreview = previewCallback;
             onSave = saveCallback;
             onCancel = cancelCallback;
@@ -78,9 +81,9 @@ namespace CodexRateMonitorNative
             root.MinimumSize = new Size(640, 0);
             root.Padding = new Padding(20, 16, 20, 8);
             root.ColumnCount = 1;
-            root.RowCount = 8;
+            root.RowCount = 9;
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            for (int row = 0; row < 8; row++)
+            for (int row = 0; row < 9; row++)
                 root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             content.Controls.Add(root);
 
@@ -155,6 +158,9 @@ namespace CodexRateMonitorNative
             attachModeRadio.AutoSize = true;
             attachModeRadio.Margin = new Padding(0, 2, 0, 0);
             attachModeRadio.CheckedChanged += ControlChanged;
+            orbModeRadio = new RadioButton { Text = I18n.T("OrbMode"), AutoSize = true,
+                Margin = new Padding(16, 2, 0, 0) };
+            orbModeRadio.CheckedChanged += ControlChanged;
             showResetCredits = new CheckBox();
             showResetCredits.Text = I18n.T("ShowResetCredits");
             showResetCredits.AutoSize = true;
@@ -174,6 +180,7 @@ namespace CodexRateMonitorNative
             usagePanelsLabel.Margin = new Padding(4, 4, 0, 0);
             modePanel.Controls.Add(desktopModeRadio);
             modePanel.Controls.Add(attachModeRadio);
+            modePanel.Controls.Add(orbModeRadio);
             modePanel.Controls.Add(showResetCredits);
             var usagePanelRow = new SettingsFlowPanel();
             usagePanelRow.Dock = DockStyle.Top;
@@ -197,6 +204,7 @@ namespace CodexRateMonitorNative
             modeContent.Controls.Add(usagePanelRow, 0, 1);
             modeGroup.Controls.Add(modeContent);
             root.Controls.Add(modeGroup, 0, 2);
+            root.Controls.Add(BuildOrbSettings(), 0, 3);
 
             // ---- Display position + Display lines: side-by-side on row 3 using two
             // distinct GroupBox containers (no divider line). When desktop floating
@@ -240,7 +248,7 @@ namespace CodexRateMonitorNative
             linesGroup.Controls.Add(linesPanel);
             positionLinesRow.Controls.Add(linesGroup, 1, 0);
 
-            root.Controls.Add(positionLinesRow, 0, 3);
+            root.Controls.Add(positionLinesRow, 0, 4);
 
             // ---- Progress display + Language: side-by-side in a single row ----
             var progressLangRow = new TableLayoutPanel();
@@ -279,7 +287,7 @@ namespace CodexRateMonitorNative
             languageGroup.Controls.Add(languagePanel);
             progressLangRow.Controls.Add(languageGroup, 1, 0);
 
-            root.Controls.Add(progressLangRow, 0, 4);
+            root.Controls.Add(progressLangRow, 0, 5);
 
             fontFamily = new ComboBox();
             fontFamily.DropDownStyle = ComboBoxStyle.DropDown;
@@ -331,14 +339,16 @@ namespace CodexRateMonitorNative
             cornerRadius = CreateNumber(0, 20, 1, 0);
 
             var typographyGroup = CreateGroup(I18n.T("Typography"));
+            stripTypographyGroup = typographyGroup;
             typographyGroup.AutoSize = true;
             typographyGroup.AutoSizeMode = AutoSizeMode.GrowAndShrink;
             typographyGroup.Controls.Add(BuildTypographyTable());
-            root.Controls.Add(typographyGroup, 0, 5);
+            root.Controls.Add(typographyGroup, 0, 6);
 
             var colorsGroup = CreateGroup(I18n.T("Colors"));
+            stripColorsGroup = colorsGroup;
             colorsGroup.Controls.Add(BuildColorsPanel());
-            root.Controls.Add(colorsGroup, 0, 6);
+            root.Controls.Add(colorsGroup, 0, 7);
 
             var hint = new Label();
             hint.Dock = DockStyle.Top;
@@ -347,7 +357,7 @@ namespace CodexRateMonitorNative
             hint.TextAlign = ContentAlignment.MiddleLeft;
             hint.ForeColor = Color.FromArgb(103, 112, 123);
             hint.Text = I18n.T("SettingsHint");
-            root.Controls.Add(hint, 0, 7);
+            root.Controls.Add(hint, 0, 8);
 
             // Keep actions visible even when the scaled content needs scrolling.
             var footer = new Panel();
@@ -358,6 +368,7 @@ namespace CodexRateMonitorNative
             Controls.Add(footer);
 
             LoadControls();
+            CreamTheme.Apply(this);
             FormClosed += delegate
             {
                 if (!committed && onCancel != null)
@@ -377,6 +388,10 @@ namespace CodexRateMonitorNative
             try
             {
                 root.Width = Math.Max(root.MinimumSize.Width, content.ClientSize.Width);
+                // Width changes can leave a wrapped child's final height one
+                // AutoSize pass ahead of its table row. Settle that row before
+                // deriving the scroll extent from the current control bounds.
+                root.PerformLayout();
                 // AutoSize rows already measure their children during layout.
                 // Reuse those bounds instead of measuring the entire tree again.
                 int contentBottom = root.Controls.Cast<Control>().Max(delegate(Control control)
@@ -681,7 +696,8 @@ namespace CodexRateMonitorNative
             panel.FlowDirection = FlowDirection.RightToLeft;
             panel.WrapContents = false;
 
-            var save = new Button();
+            var save = new CreamButton();
+            save.Tag = "primary";
             save.Text = I18n.T("SaveClose");
             save.AutoSize = true;
             save.AutoSizeMode = AutoSizeMode.GrowAndShrink;
@@ -694,17 +710,26 @@ namespace CodexRateMonitorNative
             save.FlatAppearance.BorderSize = 0;
             save.Click += delegate
             {
-                UpdateWorking();
-                committed = true;
-                if (onSave != null)
-                    onSave(working.Clone());
-                Close();
+                try
+                {
+                    UpdateWorking();
+                    if (onSave != null) onSave(working.Clone());
+                    committed = true;
+                    Close();
+                }
+                catch (Exception)
+                {
+                    MessageBox.Show(this, I18n.T("SettingsSaveFailed"), I18n.T("SettingsTitle"),
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
             };
             panel.Controls.Add(save);
+            AcceptButton = save;
 
             var cancel = CreateSecondaryButton(I18n.T("Cancel"));
             cancel.Click += delegate { Close(); };
             panel.Controls.Add(cancel);
+            CancelButton = cancel;
 
             var reset = CreateSecondaryButton(I18n.T("RestoreDefault"));
             reset.Click += delegate
@@ -718,7 +743,7 @@ namespace CodexRateMonitorNative
 
         private Button CreateSecondaryButton(string text)
         {
-            var button = new Button();
+            var button = new CreamButton();
             button.Text = text;
             button.AutoSize = true;
             button.AutoSizeMode = AutoSizeMode.GrowAndShrink;
@@ -742,8 +767,10 @@ namespace CodexRateMonitorNative
                 twoLinesRadio.Checked = working.DisplayLines == "2";
                 showRemaining.Checked = UsageDisplayTools.IsRemaining(working.UsageDisplay);
                 showUsed.Checked = !UsageDisplayTools.IsRemaining(working.UsageDisplay);
-                desktopModeRadio.Checked = working.OverlayMode == "desktop";
+                desktopModeRadio.Checked = working.OverlayMode == "desktop" && working.DesktopWidgetStyle != "orb";
                 attachModeRadio.Checked = working.OverlayMode == "attach";
+                orbModeRadio.Checked = working.OverlayMode == "desktop" && working.DesktopWidgetStyle == "orb";
+                LoadOrbControls();
                 showResetCredits.Checked = working.ShowResetCredits;
                 usagePanels.SelectedIndex = working.UsagePanels == "weekly" ? 2 : working.UsagePanels == "all" ? 1 : 0;
                 string languageCode = I18n.NormalizeSetting(working.Language);
@@ -804,6 +831,10 @@ namespace CodexRateMonitorNative
         // row. The row follows the visible group's preferred height.
         private void UpdatePositionGroupVisibility()
         {
+            if (orbGroup != null) orbGroup.Visible = orbModeRadio.Checked;
+            if (positionLinesRow != null) positionLinesRow.Visible = !orbModeRadio.Checked;
+            if (stripTypographyGroup != null) stripTypographyGroup.Visible = !orbModeRadio.Checked;
+            if (stripColorsGroup != null) stripColorsGroup.Visible = !orbModeRadio.Checked;
             bool attach = attachModeRadio != null && attachModeRadio.Checked;
             if (positionGroup != null)
                 positionGroup.Visible = attach;
@@ -826,8 +857,10 @@ namespace CodexRateMonitorNative
         private void UpdateWorking()
         {
             working.DisplayLines = twoLinesRadio.Checked ? "2" : "1";
-            working.SelectPlacement(desktopModeRadio.Checked ? "desktop" : "attach",
+            working.SelectPlacement(attachModeRadio.Checked ? "attach" : "desktop",
                 bottomPosition.Checked ? "bottom-right" : "top");
+            if (!attachModeRadio.Checked) working.DesktopWidgetStyle = orbModeRadio.Checked ? "orb" : "strip";
+            UpdateOrbWorking();
             working.UsageDisplay = showUsed.Checked ? "used" : "remaining";
             working.ShowResetCredits = showResetCredits.Checked;
             working.UsagePanels = usagePanels.SelectedIndex == 2 ? "weekly" : usagePanels.SelectedIndex == 1 ? "all" : "auto";
@@ -984,6 +1017,16 @@ namespace CodexRateMonitorNative
 
     internal sealed class SettingsGroupBox : GroupBox
     {
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.Clear(Parent == null ? CreamTheme.Background : Parent.BackColor);
+            float inset = Font.Height / 2f;
+            CreamTheme.Glass(e.Graphics, new RectangleF(1, inset, Width - 2, Math.Max(1, Height - inset - 2)),
+                15f * DeviceDpi / 96f, CreamTheme.Card, 1, 0);
+            TextRenderer.DrawText(e.Graphics, Text, Font, new Point(14 * DeviceDpi / 96, 0), CreamTheme.Text,
+                CreamTheme.Background, TextFormatFlags.NoPadding);
+        }
         public override Size GetPreferredSize(Size proposedSize)
         {
             int width = Width > 1 ? Width : proposedSize.Width;
@@ -996,8 +1039,12 @@ namespace CodexRateMonitorNative
                 {
                     Size childSize = control.GetPreferredSize(new Size(innerWidth, 0));
                     preferredWidth = Math.Max(preferredWidth, childSize.Width + control.Margin.Horizontal);
+                    // A wrapped AutoSize table can already have grown beyond
+                    // its cached preferred height after the available width
+                    // changes. Do not clip that laid-out content while its
+                    // parent negotiates the next AutoSize pass.
                     height = Math.Max(height,
-                        childSize.Height + control.Margin.Vertical);
+                        Math.Max(childSize.Height, control.Height) + control.Margin.Vertical);
                 }
             }
             // Measure wrapped children once at the available width. The base
@@ -1052,6 +1099,32 @@ namespace CodexRateMonitorNative
 
     internal sealed class OverlayPreviewControl : Control
     {
+        private bool orbExpanded = true;
+        private readonly OrbRenderer orbRenderer = new OrbRenderer();
+        private readonly RateSnapshot orbSample = new RateSnapshot
+        {
+            Primary = new WindowUsage { UsedPercent = 0 },
+            Secondary = new WindowUsage { UsedPercent = 16 }
+        };
+        private readonly ResetCreditsInfo orbSampleCredits = new ResetCreditsInfo
+        { AvailableCount = 3, EarliestExpiry = DateTime.Today.AddDays(5) };
+        public bool OrbExpanded
+        {
+            get { return orbExpanded; }
+            set { orbExpanded = value; RefreshLayout(); }
+        }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) orbRenderer.Dispose();
+            base.Dispose(disposing);
+        }
+        private bool IsOrb { get { return settings.OverlayMode == "desktop" && settings.DesktopWidgetStyle == "orb"; } }
+        private Size PreviewPixelSize()
+        {
+            return IsOrb ? OrbGeometry.PixelSize(orbExpanded, settings.Orb.ShowTaskStatus,
+                (float)(OrbGeometry.PresetScale(settings.Orb.SizePreset) * TargetDpi / 96d)) :
+                OverlayRenderer.GetSnapshotPixelSize(settings, PreviewSnapshot, settings.ShowResetCredits, TargetDpi);
+        }
         private MonitorSettings settings = new MonitorSettings();
         private int targetDpi;
         private RateSnapshot displayedSample;
@@ -1097,7 +1170,7 @@ namespace CodexRateMonitorNative
 
         private RateSnapshot PreviewSnapshot
         {
-            get { return displayedSample ?? sample; }
+            get { return IsOrb ? orbSample : displayedSample ?? sample; }
         }
 
         public void SetUsageSnapshot(RateSnapshot value)
@@ -1121,7 +1194,7 @@ namespace CodexRateMonitorNative
 
         public override Size GetPreferredSize(Size proposedSize)
         {
-            Size overlay = OverlayRenderer.GetSnapshotPixelSize(settings, PreviewSnapshot, settings.ShowResetCredits, TargetDpi);
+            Size overlay = PreviewPixelSize();
             int padding = (int)Math.Ceiling(12d * DeviceDpi / 96d);
             int width = proposedSize.Width > 0 ? proposedSize.Width : overlay.Width + padding * 2;
             float fit = Math.Min(1f, Math.Max(1, width - padding * 2) / (float)overlay.Width);
@@ -1130,7 +1203,7 @@ namespace CodexRateMonitorNative
 
         public Rectangle GetOverlayBounds()
         {
-            Size overlay = OverlayRenderer.GetSnapshotPixelSize(settings, PreviewSnapshot, settings.ShowResetCredits, TargetDpi);
+            Size overlay = PreviewPixelSize();
             int padding = (int)Math.Ceiling(12d * DeviceDpi / 96d);
             int top = Font.Height + padding * 2;
             float fit = Math.Min(1f, Math.Min(
@@ -1146,17 +1219,19 @@ namespace CodexRateMonitorNative
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            Size pixels = OverlayRenderer.GetSnapshotPixelSize(settings, PreviewSnapshot, settings.ShowResetCredits, TargetDpi);
+            Size pixels = PreviewPixelSize();
             Rectangle bounds = GetOverlayBounds();
-            using (Bitmap bitmap = OverlayRenderer.CreateBitmap(settings, PreviewSnapshot,
-                settings.ShowResetCredits ? sampleCredits : null, null, TargetDpi))
+            using (Bitmap bitmap = IsOrb ? orbRenderer.CreateBitmap(settings, PreviewSnapshot, orbSampleCredits,
+                new TaskSnapshot { State = "running", Coverage = "partial", ActiveCount = 1, CompletedSteps = 2, TotalSteps = 5 },
+                "live", "live", orbExpanded, (float)(OrbGeometry.PresetScale(settings.Orb.SizePreset) * TargetDpi / 96d)) :
+                OverlayRenderer.CreateBitmap(settings, PreviewSnapshot, settings.ShowResetCredits ? sampleCredits : null, null, TargetDpi))
             {
                 // The real window applies opacity through the compositor. Show
                 // the same transparency against this preview's background.
                 using (var attributes = new System.Drawing.Imaging.ImageAttributes())
                 {
                     var matrix = new System.Drawing.Imaging.ColorMatrix();
-                    matrix.Matrix33 = (float)settings.Style.Opacity;
+                    matrix.Matrix33 = IsOrb ? 1 : (float)settings.Style.Opacity;
                     attributes.SetColorMatrix(matrix);
                     e.Graphics.DrawImage(bitmap, bounds, 0, 0, pixels.Width, pixels.Height,
                         GraphicsUnit.Pixel, attributes);
@@ -1167,7 +1242,7 @@ namespace CodexRateMonitorNative
                 I18n.Translate("PreviewReduced", settings.Language), percent);
             string caption = I18n.Translate("LivePreview", settings.Language) + " · " +
                 I18n.Translate("PreviewSample", settings.Language) + " · " + size;
-            using (var brush = new SolidBrush(Color.FromArgb(103, 112, 123)))
+            using (var brush = new SolidBrush(CreamTheme.Muted))
                 e.Graphics.DrawString(caption, Font, brush, 8f * DeviceDpi / 96f, 6f * DeviceDpi / 96f);
         }
     }

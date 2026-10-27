@@ -103,6 +103,24 @@ internal static class FullscreenOverlayRegression
     {
         return (bool)detect.Invoke(null, new object[] { overlay.Handle });
     }
+    private static string FrontWindowGeometry(Form overlay, Form fixture)
+    {
+        // Geometry only: never capture unrelated window titles or contents.
+        var result = new System.Text.StringBuilder();
+        var seen = new System.Collections.Generic.HashSet<IntPtr>();
+        MethodInfo eligible = assembly.GetType("CodexRateMonitorNative.FullscreenDetector")
+            .GetMethod("IsApplicationWindow", Static);
+        for (IntPtr window = GetTopWindow(IntPtr.Zero); window != IntPtr.Zero && seen.Count < 32 && seen.Add(window);
+            window = GetWindow(window, 2))
+        {
+            if (window == overlay.Handle || !(bool)eligible.Invoke(null, new object[] { window })) continue;
+            Rect frame;
+            int hr = DwmGetWindowAttribute(window, 9, out frame, Marshal.SizeOf(typeof(Rect)));
+            result.Append(" [fixture=").Append(window == fixture.Handle).Append(" frame=").Append(frame)
+                .Append(" hr=").Append(hr).Append(" monitor=").Append(MonitorFromWindow(window, 2)).Append(']');
+        }
+        return result.ToString();
+    }
     private static bool Fits(Rectangle frame, Rectangle client, Rectangle screen, bool maximized = false)
     {
         return (bool)geometry.Invoke(null, new object[] { frame, client, screen, maximized });
@@ -112,7 +130,7 @@ internal static class FullscreenOverlayRegression
         Application.DoEvents();
         DwmFlush();
     }
-    private static void Restore(Form overlay, string reason)
+    private static void Restore(Form overlay, string reason, Form expectedFront = null)
     {
         Stopwatch timer = Stopwatch.StartNew();
         do
@@ -122,7 +140,15 @@ internal static class FullscreenOverlayRegression
             if (IsWindowVisible(overlay.Handle)) return;
             Thread.Sleep(25);
         } while (timer.ElapsedMilliseconds < 1500);
-        Check(false, "overlay did not restore: " + reason);
+        Check(false, "overlay did not restore: " + reason + " fullscreen=" + Full(overlay) +
+            " overlay=" + overlay.Bounds + " suppressed=" + GetSuppressed(overlay) +
+            " front=" + FrontWindowGeometry(overlay, expectedFront ?? overlay));
+    }
+
+    private static bool GetSuppressed(Form overlay)
+    {
+        return (bool)Field(overlay, "fullscreenVisibility").GetType().GetProperty("Suppressed")
+            .GetValue(Field(overlay, "fullscreenVisibility"), null);
     }
 
     private static void GeometryAndDebounce()
@@ -279,7 +305,7 @@ internal static class FullscreenOverlayRegression
             Check(!Full(overlay), "covered/background fullscreen suppressed normal desktop work");
             Call(overlay, "EnsureDesktopVisible");
             Check(!IsWindowVisible(overlay.Handle), "restore debounce did not hold");
-            Restore(overlay, "normal application above fullscreen");
+            Restore(overlay, "normal application above fullscreen", normal);
             Check(overlay.Location == original, "restoration lost unsaved location");
             Check(GetForegroundWindow() == foreground, "restoration activated overlay");
 
@@ -320,6 +346,13 @@ internal static class FullscreenOverlayRegression
             bool onScreen = false;
             foreach (Screen connected in Screen.AllScreens) onScreen |= connected.Bounds.IntersectsWith(overlay.Bounds);
             Check(onScreen, "invalidated monitor position was not recovered");
+            // Recovery may correctly choose the primary monitor. The following
+            // fullscreen/maximized checks must target this fixture's monitor,
+            // rather than accidentally testing an application on a different one.
+            overlay.Location = original;
+            Pump();
+            Check(MonitorFromWindow(overlay.Handle, 2) == MonitorFromWindow(fullscreen.Handle, 2),
+                "fullscreen fixture and overlay are on different monitors");
 
             using (var maximized = new Fixture(normalBounds, true))
             {
@@ -329,8 +362,14 @@ internal static class FullscreenOverlayRegression
             }
             fullscreen.Bounds = bounds;
             fullscreen.Raise();
-            Check(Full(overlay), "restored fullscreen fixture did not regain fullscreen state");
+            Check(Full(overlay), "restored fullscreen fixture did not regain fullscreen state; fixture=" + fullscreen.Bounds +
+                " overlay=" + overlay.Bounds + " expectedScreen=" + bounds +
+                " fixtureMonitor=" + MonitorFromWindow(fullscreen.Handle, 2) + " overlayMonitor=" + MonitorFromWindow(overlay.Handle, 2));
             Call(overlay, "EnsureDesktopVisible");
+            // Persist a location on the fixture's screen before a mode switch;
+            // zero/unset coordinates legitimately resolve to the primary screen.
+            Set(settings, "DesktopX", original.X);
+            Set(settings, "DesktopY", original.Y);
             Set(settings, "OverlayMode", "attach");
             Call(overlay, "ApplySettings", settings);
             Call(overlay, "AttachTo", normal.Handle);
@@ -338,7 +377,11 @@ internal static class FullscreenOverlayRegression
             Set(settings, "OverlayMode", "desktop");
             Call(overlay, "ApplySettings", settings);
             Call(overlay, "ShowDesktop");
-            Check(!IsWindowVisible(overlay.Handle), "mode switch flashed overlay over fullscreen");
+            Check(!IsWindowVisible(overlay.Handle), "mode switch flashed overlay over fullscreen; overlay=" + overlay.Bounds +
+                " fixture=" + fullscreen.Bounds + " detected=" + Full(overlay) +
+                " overlayMonitor=" + MonitorFromWindow(overlay.Handle, 2) +
+                " fixtureMonitor=" + MonitorFromWindow(fullscreen.Handle, 2) +
+                " front=" + FrontWindowGeometry(overlay, fullscreen));
         }
         // Also start directly under fullscreen, before the overlay was ever shown.
         using (var fullscreen = new Fixture(bounds))
@@ -377,6 +420,57 @@ internal static class FullscreenOverlayRegression
         }
     }
 
+    private static void NativeOrbTransitions(Screen screen)
+    {
+        Type settingsType = assembly.GetType("CodexRateMonitorNative.MonitorSettings", true);
+        if (settingsType.GetProperty("DesktopWidgetStyle") == null) return; // Original baseline has no orb mode.
+        object settings = New("MonitorSettings");
+        Set(settings, "DesktopWidgetStyle", "orb");
+        object orb = settingsType.GetProperty("Orb").GetValue(settings, null);
+        Set(orb, "ExpandOnHover", false);
+        Set(orb, "AnimationEnabled", false);
+        object position = orb.GetType().GetProperty("Position").GetValue(orb, null);
+        Set(position, "HasSavedPosition", true);
+        Set(position, "MonitorId", screen.DeviceName);
+        Set(position, "OffsetXDip", 80d);
+        Set(position, "OffsetYDip", 80d);
+        Rectangle normalBounds = new Rectangle(screen.Bounds.Left + 30, screen.Bounds.Top + 30, 500, 350);
+        using (var normal = new Fixture(normalBounds, true))
+        using (var fullscreen = new Fixture(screen.Bounds))
+        using (var overlay = (Form)Activator.CreateInstance(assembly.GetType("CodexRateMonitorNative.OverlayForm", true), new object[] { settings }))
+        {
+            normal.Raise();
+            Call(overlay, "EnsureDesktopVisible");
+            Check(IsWindowVisible(overlay.Handle), "orb was not shown on normal desktop");
+            Point anchor = (Point)Field(overlay, "orbAnchor");
+            anchor.Offset(8, 12); // Unsaved on-screen movement must survive updates while hidden.
+            Field(overlay, "orbAnchor", anchor);
+            Call(overlay, "UpdateOrbBounds");
+            Point compactLocation = overlay.Location;
+            Size compactSize = overlay.Size;
+            Call(overlay, "RequestOrbTarget", true, false);
+            Call(overlay, "OrbTick", null, EventArgs.Empty);
+            Check(overlay.Width > compactSize.Width, "orb did not expand before fullscreen");
+            fullscreen.Raise();
+            Check(Full(overlay), "orb is not associated with the fullscreen fixture's monitor");
+            IntPtr foreground = GetForegroundWindow();
+            Call(overlay, "EnsureDesktopVisible");
+            Check(!IsWindowVisible(overlay.Handle), "fullscreen did not hide expanded orb");
+            Check(overlay.Size == compactSize && overlay.Location == compactLocation, "hidden orb did not collapse to its anchor");
+            for (int repeat = 0; repeat < 5; repeat++)
+            {
+                Call(overlay, "ApplySettings", settings);
+                Call(overlay, "ClearSnapshot", "read-only fullscreen test");
+                Check(!IsWindowVisible(overlay.Handle) && overlay.Location == compactLocation,
+                    "orb settings/data update moved or exposed a fullscreen-hidden orb");
+            }
+            normal.Raise();
+            Restore(overlay, "orb returned from fullscreen");
+            Check(overlay.Size == compactSize && overlay.Location == compactLocation, "orb restoration lost compact anchor");
+            Check(GetForegroundWindow() == foreground, "orb fullscreen cycle stole focus");
+        }
+    }
+
     [STAThread] private static void Main(string[] args)
     {
         IntPtr foreground = GetForegroundWindow();
@@ -395,6 +489,7 @@ internal static class FullscreenOverlayRegression
             geometry = detector.GetMethod("IsFullscreenGeometry", Static);
             GeometryAndDebounce();
             foreach (Screen screen in Screen.AllScreens) NativeTransitions(screen);
+            foreach (Screen screen in Screen.AllScreens) NativeOrbTransitions(screen);
             MultipleMonitors();
             Console.WriteLine("PASS " + assertions + " fullscreen assertions: geometry, debounce, Z order, visibility, focus, position, updates and modes.");
         }

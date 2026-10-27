@@ -20,7 +20,7 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 }
 $outputPath = [IO.Path]::GetFullPath($OutputDirectory)
 $artifactsRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'artifacts'))
-if (-not $outputPath.StartsWith($artifactsRoot, [StringComparison]::OrdinalIgnoreCase)) {
+if (-not $outputPath.StartsWith($artifactsRoot.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
     throw "OutputDirectory must stay under '$artifactsRoot'."
 }
 
@@ -78,6 +78,17 @@ $sources = @(
     (Join-Path $repoRoot 'src\AppearanceSettingsForm.cs'),
     (Join-Path $repoRoot 'src\DpiAwareDialog.cs'),
     (Join-Path $repoRoot 'src\OverlayRenderer.cs'),
+    (Join-Path $repoRoot 'src\OrbSettings.cs'),
+    (Join-Path $repoRoot 'src\InstanceSignals.cs'),
+    (Join-Path $repoRoot 'src\TaskSnapshot.cs'),
+    (Join-Path $repoRoot 'src\TaskStatusProvider.cs'),
+    (Join-Path $repoRoot 'src\CreamTheme.cs'),
+    (Join-Path $repoRoot 'src\CreamButton.cs'),
+    (Join-Path $repoRoot 'src\CreamMenuRenderer.cs'),
+    (Join-Path $repoRoot 'src\OrbRenderer.cs'),
+    (Join-Path $repoRoot 'src\SvgMark.cs'),
+    (Join-Path $repoRoot 'src\OrbOverlay.cs'),
+    (Join-Path $repoRoot 'src\OrbSettingsPanel.cs'),
     (Join-Path $repoRoot 'src\UsageRefreshScheduler.cs'),
     (Join-Path $repoRoot 'src\DiagnosticLog.cs'),
     (Join-Path $repoRoot 'src\Localization.cs'),
@@ -112,6 +123,9 @@ Copy-Item -LiteralPath (Join-Path $repoRoot 'config\settings.default.json') -Des
 Copy-Item -LiteralPath (Join-Path $repoRoot 'style-examples') -Destination (Join-Path $outputPath 'style-examples') -Recurse
 New-Item -ItemType Directory -Path (Join-Path $outputPath 'assets') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $repoRoot 'assets\logo.png') -Destination (Join-Path $outputPath 'assets\logo.png')
+foreach ($asset in @('openai-mark.svg', 'THIRD-PARTY-NOTICES.md', 'simple-icons-LICENSE.txt')) {
+    Copy-Item -LiteralPath (Join-Path $repoRoot "assets\$asset") -Destination (Join-Path $outputPath "assets\$asset")
+}
 foreach ($readme in @('README.md', 'README.zh-CN.md', 'README.zh-TW.md')) {
     Copy-Item -LiteralPath (Join-Path $repoRoot $readme) -Destination (Join-Path $outputPath $readme)
 }
@@ -120,6 +134,10 @@ Copy-Item -LiteralPath (Join-Path $repoRoot 'SECURITY.md') -Destination (Join-Pa
 New-Item -ItemType Directory -Path (Join-Path $outputPath 'docs') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\usage-refresh.md') -Destination (Join-Path $outputPath 'docs\usage-refresh.md')
 Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\issue-6-dpi-regression.md') -Destination (Join-Path $outputPath 'docs\issue-6-dpi-regression.md')
+foreach ($document in (Get-ChildItem -LiteralPath (Join-Path $repoRoot 'docs') -File |
+    Where-Object { $_.Name -like 'orb-*' -or $_.Name -eq 'capability-report.md' })) {
+    Copy-Item -LiteralPath $document.FullName -Destination (Join-Path (Join-Path $outputPath 'docs') $document.Name)
+}
 foreach ($screenshot in @(
     'appearance-settings-reset-credits-zh-cn.png',
     'overlay-oneline-credits-zh-cn.png',

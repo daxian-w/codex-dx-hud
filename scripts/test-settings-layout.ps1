@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$MonitorPath = '',
-    [string]$CaptureDirectory = ''
+    [string]$CaptureDirectory = '',
+    [switch]$UpdateOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,12 +32,13 @@ using System.Windows.Forms;
 internal static class SettingsLayoutSmoke
 {
     private const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
+    private static string scenario = "startup";
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
 
     private static void Check(bool condition, string message)
     {
-        if (!condition) throw new Exception(message);
+        if (!condition) throw new Exception(scenario + ": " + message);
     }
 
     [STAThread]
@@ -48,7 +50,7 @@ internal static class SettingsLayoutSmoke
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
-            Run(Assembly.LoadFrom(args[0]), args.Length > 1 ? args[1] : "");
+            Run(Assembly.LoadFrom(args[0]), args.Length > 1 ? args[1] : "", Array.IndexOf(args, "--update-only") >= 0);
         }
         catch (Exception ex)
         {
@@ -71,6 +73,21 @@ internal static class SettingsLayoutSmoke
     // display settings. Native borders/glyphs retain the host's real DPI.
     private static void SimulateDpi(Form form, int dpi, int width = 820, int height = 760)
     {
+        // Current dialogs keep a logical DPI baseline used by FitToWorkingArea.
+        // Exercise that production path rather than scaling controls while
+        // leaving the dialog's internal LayoutDpi at the host monitor's value.
+        MethodInfo apply = null;
+        for (Type current = form.GetType(); current != null && apply == null; current = current.BaseType)
+            apply = current.GetMethod("ApplyDpiLayout", PrivateInstance | BindingFlags.DeclaredOnly);
+        if (apply != null)
+        {
+            form.MaximumSize = new Size(6000, 6000);
+            apply.Invoke(form, new object[] { dpi });
+            PropertyInfo layoutDpi = form.GetType().GetProperty("LayoutDpi", PrivateInstance);
+            Check(layoutDpi != null && (int)layoutDpi.GetValue(form, null) == dpi,
+                "production DPI baseline did not follow the requested test DPI");
+            return;
+        }
         float factor;
         using (Graphics graphics = form.CreateGraphics()) factor = dpi / graphics.DpiX;
         var fonts = Descendants(form).Concat(new Control[] { form }).ToDictionary(
@@ -128,7 +145,9 @@ internal static class SettingsLayoutSmoke
             {
                 if (sibling == control || !sibling.Visible) continue;
                 Check(!control.Bounds.IntersectsWith(sibling.Bounds),
-                    "overlapping controls: " + control.Text + " / " + sibling.Text);
+                    "overlapping controls: " + control.Text + " / " + sibling.Text +
+                    "; bounds=" + control.Bounds + " / " + sibling.Bounds +
+                    "; fonts=" + control.Font.Size + " " + control.Font.Unit + " / " + sibling.Font.Size + " " + sibling.Font.Unit);
             }
         }
     }
@@ -202,17 +221,20 @@ internal static class SettingsLayoutSmoke
         Console.WriteLine("PASS live preview, edited settings commit and cancel callbacks.");
     }
 
-    private static void Run(Assembly assembly, string captures)
+    private static void Run(Assembly assembly, string captures, bool updateOnly)
     {
         Type settingsType = assembly.GetType("CodexRateMonitorNative.MonitorSettings", true);
         Type formType = assembly.GetType("CodexRateMonitorNative.AppearanceSettingsForm", true);
         Type i18n = assembly.GetType("CodexRateMonitorNative.I18n", true);
         if (!string.IsNullOrEmpty(captures)) Directory.CreateDirectory(captures);
+        if (!updateOnly)
+        {
         int cases = 0;
         foreach (string language in new string[] { "zh-CN", "zh-TW", "en" })
         foreach (int dpi in new int[] { 96, 120, 144, 168, 192 })
         foreach (string mode in new string[] { "desktop", "attach" })
         {
+            scenario = language + "/" + dpi + "/" + mode;
             i18n.GetMethod("SetLanguage").Invoke(null, new object[] { language });
             object settings = Activator.CreateInstance(settingsType, true);
             settingsType.GetProperty("OverlayMode").SetValue(settings, mode, null);
@@ -262,6 +284,9 @@ internal static class SettingsLayoutSmoke
                     new Rectangle(-1366, 40, 1366, 680)
                 })
                 {
+                    PropertyInfo layoutDpi = formType.GetProperty("LayoutDpi", PrivateInstance);
+                    scenario = language + "/" + dpi + "/" + mode + "/work=" + workArea +
+                        "/productLayoutDpi=" + (layoutDpi == null ? "n/a" : Convert.ToString(layoutDpi.GetValue(form, null)));
                     fit.Invoke(form, new object[] { workArea });
                     Check(workArea.Contains(form.Bounds), "window extends outside the working area");
                     Check(form.ClientRectangle.Contains(footer.Bounds), "footer is outside the window");
@@ -303,11 +328,13 @@ internal static class SettingsLayoutSmoke
         Console.WriteLine("PASS " + cases + " settings layouts: 100%-200%, 3 languages, 2 display modes; startup, containment, overlap, scrolling and footer checks.");
         typeof(SettingsLayoutSmoke).GetMethod("VerifyCallbacks", BindingFlags.Static | BindingFlags.NonPublic)
             .MakeGenericMethod(settingsType).Invoke(null, new object[] { formType, i18n });
+        }
         Type updateType = assembly.GetType("CodexRateMonitorNative.UpdateForm", true);
         Type infoType = assembly.GetType("CodexRateMonitorNative.UpdateInfo", true);
         foreach (string language in new string[] { "zh-CN", "zh-TW", "en" })
         foreach (int dpi in new int[] { 96, 120, 144, 168, 192 })
         {
+            scenario = "update/" + language + "/" + dpi;
             i18n.GetMethod("SetLanguage").Invoke(null, new object[] { language });
             object info = Activator.CreateInstance(infoType, true);
             infoType.GetProperty("Version").SetValue(info, "9.9.9", null);
@@ -320,6 +347,12 @@ internal static class SettingsLayoutSmoke
                 form.Opacity = 0;
                 form.Show();
                 SimulateDpi(form, dpi, 560, 430);
+                Label title = form.Controls.OfType<Label>().First();
+                Label version = form.Controls.OfType<Label>().Skip(1).First();
+                Check(Math.Abs(title.Left - Math.Round(20d * dpi / 96d)) <= 1 &&
+                    Math.Abs(title.Top - Math.Round(18d * dpi / 96d)) <= 1 &&
+                    Math.Abs(version.Top - Math.Round(54d * dpi / 96d)) <= 1,
+                    "AutoSize update labels retained unscaled absolute positions");
                 VerifyContent(form);
                 foreach (Control control in form.Controls)
                     Check(form.ClientRectangle.Contains(control.Bounds), "update dialog control is outside the window");
@@ -338,5 +371,8 @@ if (-not $csc) { throw '.NET Framework C# compiler was not found.' }
 Copy-Item -LiteralPath (Join-Path $repoRoot 'src\app.config') -Destination ($testExe + '.config') -Force
 & $csc /nologo /target:exe /win32manifest:"$(Join-Path $repoRoot 'src\app.manifest')" /out:"$testExe" /reference:System.Drawing.dll /reference:System.Windows.Forms.dll $testSource
 if ($LASTEXITCODE -ne 0) { throw 'Settings layout smoke test compilation failed.' }
-& $testExe $monitorExe $CaptureDirectory
+if ($UpdateOnly -and [string]::IsNullOrWhiteSpace($CaptureDirectory)) { $CaptureDirectory = Join-Path $testDirectory 'update-only' }
+$testArguments = @($monitorExe, $CaptureDirectory)
+if ($UpdateOnly) { $testArguments += '--update-only' }
+& $testExe @testArguments
 if ($LASTEXITCODE -ne 0) { throw 'Settings layout smoke test failed.' }

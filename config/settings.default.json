@@ -1,4 +1,25 @@
 {
+  "SettingsSchemaVersion": 2,
+  "DesktopWidgetStyle": "strip",
+  "Orb": {
+    "SizePreset": "compact",
+    "Skin": "cream",
+    "ExpandOnHover": true,
+    "ExpandDelayMs": 120,
+    "CollapseDelayMs": 260,
+    "AnimationEnabled": true,
+    "AnimationDurationMs": 180,
+    "ShowTaskStatus": true,
+    "GlassOpacity": 0.94,
+    "GlowStrength": 0.75,
+    "CornerRadiusScale": 1.0,
+    "Position": {
+      "HasSavedPosition": false,
+      "MonitorId": null,
+      "OffsetXDip": 0,
+      "OffsetYDip": 0
+    }
+  },
   "Language": "auto",
   "Position": "top",
   "DisplayLines": "1",

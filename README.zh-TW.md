@@ -18,11 +18,20 @@
 - **重置券唯讀查詢**：顯示可用數量與最早到期時間，不執行核銷。
 - **日常使用便捷**：即時外觀預覽、三語介面、開機啟動及驗證式原地更新。
 
+## 玻璃懸浮球預覽（0.4.0）
+
+新增奶油玻璃風懸浮球，滑鼠移入展開、移出收合，五檔尺寸預設「緊湊」。原懸浮列與視窗吸附繼續保留，設定、選單及更新視窗統一主題。
+
+任務狀態來自本機Codex Desktop結構化活動的局部唯讀觀測；未知資料不顯示為0，不虛構計畫進度。Windows11與真實滑鼠驗收尚未完成。詳見[使用說明](docs/orb-guide.md)、[能力報告](docs/capability-report.md)及[驗收狀態](docs/orb-acceptance-report.md)（簡體中文）。
+
+![收合懸浮球（範例資料）](docs/orb-collapsed-sample.png)
+![展開卡片（範例資料）](docs/orb-expanded-sample.png)
+
 ## 安裝與使用
 
 需要 Windows 10/11、.NET Framework 4.8，以及使用 ChatGPT 帳戶登入的 ChatGPT 桌面版、Codex App 或 Codex CLI。API Key 登入不提供訂閱額度。
 
-1. 從 [Releases](https://github.com/D1NOOO/codex-usage-monitor/releases) 下載 `CodexRateMonitor-VERSION-windows-x64.zip`，使用 `SHA256SUMS.txt` 驗證。
+1. 從 [Releases](https://github.com/daxian-w/codex-huds/releases) 下載 `CodexRateMonitor-VERSION-windows-x64.zip`，使用 `SHA256SUMS.txt` 驗證。
 2. 解壓縮到固定目錄，執行 `CodexRateMonitor.exe`。
 3. 右鍵通知區域圖示開啟選單，雙擊開啟外觀設定；圖示可能位於 `^` 隱藏區域。
 
@@ -69,7 +78,7 @@
 
 ## 設定
 
-常用選項可在外觀設定中調整，其他欄位見[預設設定](https://github.com/D1NOOO/codex-usage-monitor/blob/main/config/settings.default.json)。
+常用選項可在外觀設定中調整，其他欄位見[預設設定](https://github.com/daxian-w/codex-huds/blob/main/config/settings.default.json)。
 
 | 欄位 | 可選值 / 預設值 |
 |---|---|
@@ -101,12 +110,12 @@
 | 額度為空 / 登入失效 | 使用 ChatGPT 帳戶重新登入，再點擊通知區域選單的「立即重新整理」。 |
 | 浮動列未顯示或位置不正確 | 確認監視器正在執行、吸附目標視窗可見，並在外觀設定中調整位置。 |
 
-仍有問題時，請[提交 issue](https://github.com/D1NOOO/codex-usage-monitor/issues) 並附上隱藏私人資訊的截圖。
+仍有問題時，請[提交 issue](https://github.com/daxian-w/codex-huds/issues) 並附上隱藏私人資訊的截圖。
 
 ## 建置與發佈
 
 ```powershell
-git clone https://github.com/D1NOOO/codex-usage-monitor.git
+git clone https://github.com/daxian-w/codex-huds.git
 cd codex-usage-monitor
 .\scripts\verify.ps1
 .\scripts\build.ps1 -Package

@@ -32,7 +32,7 @@ foreach ($document in $documentationFiles) {
 }
 
 $textExtensions = @(
-    '.cs', '.ps1', '.md', '.json', '.yml', '.yaml', '.txt',
+    '.cs', '.ps1', '.cjs', '.md', '.json', '.yml', '.yaml', '.txt',
     '.gitignore', '.gitattributes', '.editorconfig'
 )
 $textFiles = Get-ChildItem -LiteralPath $repoRoot -Recurse -File |
@@ -85,11 +85,8 @@ if ($badCounts.Count -gt 0) {
     throw 'Every localization key must exist exactly once in zh-CN, zh-TW, and en.'
 }
 
-$source = (Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'src\CodexRateMonitor.cs')) +
-    (Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'src\AppearanceSettingsForm.cs')) +
-    (Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'src\OverlayRenderer.cs')) +
-    (Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'src\UpdateChecker.cs')) +
-    (Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'src\UpdateForm.cs'))
+$source = (Get-ChildItem -LiteralPath (Join-Path $repoRoot 'src') -Filter '*.cs' -File |
+    ForEach-Object { Get-Content -Raw -Encoding UTF8 -LiteralPath $_.FullName }) -join "`n"
 $usedKeys = [regex]::Matches($source, 'I18n\.(?:T|F|Translate)\("([A-Za-z0-9]+)"') |
     ForEach-Object { $_.Groups[1].Value } |
     Sort-Object -Unique

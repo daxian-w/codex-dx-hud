@@ -37,9 +37,9 @@ namespace CodexRateMonitorNative
     internal sealed class UpdateChecker : IDisposable
     {
         private const string LatestReleaseApi =
-            "https://api.github.com/repos/D1NOOO/codex-usage-monitor/releases/latest";
+            "https://api.github.com/repos/daxian-w/codex-huds/releases/latest";
         private const string LatestReleasePage =
-            "https://github.com/D1NOOO/codex-usage-monitor/releases/latest";
+            "https://github.com/daxian-w/codex-huds/releases/latest";
         private static readonly TimeSpan BackgroundInterval = TimeSpan.FromHours(6);
 
         private readonly string currentVersion;
@@ -202,13 +202,13 @@ namespace CodexRateMonitorNative
                     throw new InvalidDataException("Invalid release version.");
 
                 string packageName = "CodexRateMonitor-" + latestVersion + "-windows-x64.zip";
-                string downloadRoot = "https://github.com/D1NOOO/codex-usage-monitor/releases/download/" +
+                string downloadRoot = "https://github.com/daxian-w/codex-huds/releases/download/" +
                     Uri.EscapeDataString(tag) + "/";
                 string notes = string.Empty;
                 try
                 {
                     notes = DownloadText(
-                        "https://raw.githubusercontent.com/D1NOOO/codex-usage-monitor/" +
+                        "https://raw.githubusercontent.com/daxian-w/codex-huds/" +
                         Uri.EscapeDataString(tag) + "/.github/release-notes/" +
                         Uri.EscapeDataString(tag) + ".md",
                         15000);
@@ -411,15 +411,7 @@ namespace CodexRateMonitorNative
             string root = args[5];
             try
             {
-                try
-                {
-                    Process parent = Process.GetProcessById(parentPid);
-                    if (!parent.WaitForExit(30000))
-                        throw new InvalidOperationException("Codex Rate Monitor did not exit in time.");
-                }
-                catch
-                {
-                }
+                WaitForParentExit(parentPid, executable, 30000);
 
                 string staging = Path.Combine(root, "staging");
                 Directory.CreateDirectory(staging);
@@ -443,13 +435,45 @@ namespace CodexRateMonitorNative
             }
         }
 
+        internal static void WaitForParentExit(int parentPid, string expectedExecutable, int timeoutMilliseconds)
+        {
+            Process parent;
+            try { parent = Process.GetProcessById(parentPid); }
+            catch (ArgumentException) { return; } // Parent already exited.
+            using (parent)
+            {
+                if (parent.HasExited) return;
+                string actual;
+                try { actual = parent.MainModule.FileName; }
+                catch (System.ComponentModel.Win32Exception)
+                {
+                    if (parent.HasExited) return;
+                    throw;
+                }
+                if (!string.Equals(Path.GetFullPath(actual), Path.GetFullPath(expectedExecutable), StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("The update parent executable does not match.");
+                if (!parent.WaitForExit(timeoutMilliseconds))
+                    throw new InvalidOperationException("Codex Rate Monitor did not exit in time.");
+            }
+        }
+
         private static void CopyPayload(string source, string destination)
         {
-            foreach (string directory in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
-            {
-                string relative = directory.Substring(source.Length).TrimStart(Path.DirectorySeparatorChar);
-                Directory.CreateDirectory(Path.Combine(destination, relative));
-            }
+            CopyPayloadTransactional(source, destination, CopyWithRetry);
+        }
+
+        // Keep a complete backup before the first replacement. The injectable
+        // copy operation lets regression tests fail after real earlier writes.
+        internal static void CopyPayloadTransactional(string source, string destination, Action<string, string> copy)
+        {
+            source = NormalizeUpdateDirectory(source);
+            destination = NormalizeUpdateDirectory(destination);
+            string sourcePrefix = source.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            string destinationPrefix = destination.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (string.Equals(source, destination, StringComparison.OrdinalIgnoreCase) || source.StartsWith(destinationPrefix, StringComparison.OrdinalIgnoreCase) ||
+                destination.StartsWith(sourcePrefix, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Update source and installation directories must be separate.");
+            string backupRoot = Path.Combine(Path.GetDirectoryName(source), "rollback-" + Guid.NewGuid().ToString("N"));
             string[] files = Directory.GetFiles(source, "*", SearchOption.AllDirectories);
             Array.Sort(files, delegate(string left, string right)
             {
@@ -461,18 +485,115 @@ namespace CodexRateMonitorNative
                     return string.Compare(left, right, StringComparison.OrdinalIgnoreCase);
                 return leftExe ? 1 : -1;
             });
+            var replacements = new List<PayloadReplacement>();
             foreach (string file in files)
             {
-                string relative = file.Substring(source.Length).TrimStart(Path.DirectorySeparatorChar);
+                string relative = file.Substring(sourcePrefix.Length);
                 string target = Path.Combine(destination, relative);
                 if (string.Equals(relative, "settings.json", StringComparison.OrdinalIgnoreCase) &&
                     File.Exists(target))
                     continue;
-                string parent = Path.GetDirectoryName(target);
-                if (!Directory.Exists(parent))
-                    Directory.CreateDirectory(parent);
-                CopyWithRetry(file, target);
+                EnsureSafeUpdateTarget(destination, target);
+                if (Directory.Exists(target)) throw new IOException("An update file conflicts with an installation directory.");
+                var entry = new PayloadReplacement { Source = file, Target = target,
+                    Backup = Path.Combine(backupRoot, relative), Existed = File.Exists(target) };
+                if (entry.Existed)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(entry.Backup));
+                    File.Copy(target, entry.Backup, false);
+                }
+                replacements.Add(entry);
             }
+            var attempted = new List<PayloadReplacement>();
+            var createdDirectories = new List<string>();
+            try
+            {
+                foreach (PayloadReplacement entry in replacements)
+                {
+                    EnsureSafeUpdateTarget(destination, entry.Target);
+                    CreateUpdateDirectories(Path.GetDirectoryName(entry.Target), createdDirectories);
+                    attempted.Add(entry); // File.Copy can fail after creating/truncating a file.
+                    copy(entry.Source, entry.Target);
+                }
+            }
+            catch (Exception original)
+            {
+                var failures = new List<Exception>();
+                for (int index = attempted.Count - 1; index >= 0; index--)
+                {
+                    PayloadReplacement entry = attempted[index];
+                    try
+                    {
+                        EnsureSafeUpdateTarget(destination, entry.Target);
+                        if (entry.Existed) CopyWithRetry(entry.Backup, entry.Target);
+                        else if (File.Exists(entry.Target)) File.Delete(entry.Target);
+                    }
+                    catch (Exception rollbackError) { failures.Add(rollbackError); }
+                }
+                for (int index = createdDirectories.Count - 1; index >= 0; index--)
+                {
+                    string directory = createdDirectories[index];
+                    try
+                    {
+                        // Empty-directory deletion only. Preserve files another
+                        // application may have added while the update ran.
+                        if (directory.StartsWith(destinationPrefix, StringComparison.OrdinalIgnoreCase))
+                        {
+                            EnsureSafeUpdateTarget(destination, directory);
+                            if (Directory.Exists(directory) && Directory.GetFileSystemEntries(directory).Length == 0)
+                                Directory.Delete(directory, false);
+                        }
+                    }
+                    catch (IOException) { }
+                    catch (UnauthorizedAccessException) { }
+                }
+                if (failures.Count > 0)
+                {
+                    failures.Insert(0, original);
+                    throw new IOException("Update rollback was incomplete. Backups retained at: " + backupRoot,
+                        new AggregateException(failures));
+                }
+                throw new IOException("Update failed; previous files restored.", original);
+            }
+        }
+
+        private sealed class PayloadReplacement
+        {
+            public string Source, Target, Backup;
+            public bool Existed;
+        }
+
+        private static void CreateUpdateDirectories(string directory, List<string> created)
+        {
+            var missing = new Stack<string>();
+            for (string current = directory; !Directory.Exists(current); current = Path.GetDirectoryName(current))
+                missing.Push(current);
+            while (missing.Count > 0)
+            {
+                string current = missing.Pop();
+                Directory.CreateDirectory(current);
+                created.Add(current);
+            }
+        }
+
+        private static void EnsureSafeUpdateTarget(string root, string target)
+        {
+            string prefix = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            string full = Path.GetFullPath(target);
+            if (!full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Update path escaped the installation directory.");
+            for (string current = full; current != null && current.Length >= root.Length; current = Path.GetDirectoryName(current))
+                if ((File.Exists(current) || Directory.Exists(current)) &&
+                    (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                    throw new IOException("Update target contains a reparse point.");
+        }
+
+        private static string NormalizeUpdateDirectory(string path)
+        {
+            string full = Path.GetFullPath(path);
+            string trimmed = full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string root = Path.GetPathRoot(full);
+            return trimmed.Length < root.Length ? root : trimmed;
         }
 
         private static void CopyWithRetry(string source, string target)
@@ -560,35 +681,39 @@ namespace CodexRateMonitorNative
 
         private static void CleanupLater(string root)
         {
-            if (string.IsNullOrWhiteSpace(root))
-                return;
             string full;
-            try
-            {
-                full = Path.GetFullPath(root);
-                string temp = Path.GetFullPath(Path.GetTempPath());
-                if (!full.StartsWith(temp, StringComparison.OrdinalIgnoreCase) ||
-                    Path.GetFileName(full).IndexOf("CodexRateMonitor-update-", StringComparison.OrdinalIgnoreCase) != 0)
-                    return;
-            }
-            catch
-            {
-                return;
-            }
+            if (!IsOwnedUpdateDirectory(root, out full)) return;
 
             for (int attempt = 0; attempt < 10; attempt++)
             {
                 try
                 {
-                    if (Directory.Exists(full))
-                        Directory.Delete(full, true);
+                    // Revalidate before each recursive delete, including retries.
+                    if (!IsOwnedUpdateDirectory(root, out full)) return;
+                    if (Directory.Exists(full)) Directory.Delete(full, true);
                     return;
                 }
-                catch
-                {
-                    Thread.Sleep(1000);
-                }
+                catch { Thread.Sleep(1000); }
             }
+        }
+
+        internal static bool IsOwnedUpdateDirectory(string root, out string full)
+        {
+            full = null;
+            if (string.IsNullOrWhiteSpace(root)) return false;
+            try
+            {
+                full = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string temp = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                const string prefix = "CodexRateMonitor-update-";
+                string name = Path.GetFileName(full);
+                Guid identifier;
+                if (!string.Equals(Path.GetDirectoryName(full), temp, StringComparison.OrdinalIgnoreCase) ||
+                    !name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+                    !Guid.TryParseExact(name.Substring(prefix.Length), "N", out identifier)) return false;
+                return !Directory.Exists(full) || (File.GetAttributes(full) & FileAttributes.ReparsePoint) == 0;
+            }
+            catch { return false; }
         }
     }
 }

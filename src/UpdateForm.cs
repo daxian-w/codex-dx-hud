@@ -68,7 +68,7 @@ namespace CodexRateMonitorNative
             statusLabel.ForeColor = Color.DimGray;
             Controls.Add(statusLabel);
 
-            updateButton = new Button();
+            updateButton = new CreamButton { Tag = "primary" };
             updateButton.Text = I18n.T("UpdateAction");
             updateButton.Size = new Size(92, 32);
             updateButton.Location = new Point(348, 374);
@@ -80,13 +80,14 @@ namespace CodexRateMonitorNative
             };
             Controls.Add(updateButton);
 
-            cancelButton = new Button();
+            cancelButton = new CreamButton();
             cancelButton.Text = I18n.T("Cancel");
             cancelButton.Size = new Size(92, 32);
             cancelButton.Location = new Point(446, 374);
             cancelButton.DialogResult = DialogResult.Cancel;
             Controls.Add(cancelButton);
             CancelButton = cancelButton;
+            CreamTheme.Apply(this);
             InitializeDpiLayout(new Size(560, 430));
             ResumeLayout(true);
         }

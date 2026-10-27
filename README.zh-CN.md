@@ -18,11 +18,20 @@
 - **重置券只读查询**：展示可用数量与最早到期时间，不执行核销。
 - **日常使用便捷**：实时外观预览、三语界面、开机启动及校验式原地更新。
 
+## 玻璃悬浮球预览（0.4.0）
+
+新增奶油玻璃风悬浮球，鼠标移入展开、移出收起，五档尺寸默认“紧凑”。原悬浮条和窗口吸附继续保留，设置、菜单及更新窗口统一主题。
+
+任务状态来自本地Codex Desktop结构化活动的局部只读观测；未知数据不写成0，不伪造计划进度。Windows11和真实鼠标验收尚未完成。详见[使用说明](docs/orb-guide.md)、[能力报告](docs/capability-report.md)与[验收状态](docs/orb-acceptance-report.md)。
+
+![折叠悬浮球（示例数据）](docs/orb-collapsed-sample.png)
+![展开卡片（示例数据）](docs/orb-expanded-sample.png)
+
 ## 安装与使用
 
 需要 Windows 10/11、.NET Framework 4.8，以及使用 ChatGPT 账号登录的 ChatGPT 桌面端、Codex App 或 Codex CLI。API Key 登录不提供订阅额度。
 
-1. 从 [Releases](https://github.com/D1NOOO/codex-usage-monitor/releases) 下载 `CodexRateMonitor-VERSION-windows-x64.zip`，使用 `SHA256SUMS.txt` 校验。
+1. 从 [Releases](https://github.com/daxian-w/codex-huds/releases) 下载 `CodexRateMonitor-VERSION-windows-x64.zip`，使用 `SHA256SUMS.txt` 校验。
 2. 解压到固定目录，运行 `CodexRateMonitor.exe`。
 3. 右键托盘图标打开菜单，双击打开外观设置；图标可能位于 `^` 隐藏区域。
 
@@ -69,7 +78,7 @@
 
 ## 配置
 
-常用选项可在外观设置中调整，其他字段见[默认配置](https://github.com/D1NOOO/codex-usage-monitor/blob/main/config/settings.default.json)。
+常用选项可在外观设置中调整，其他字段见[默认配置](https://github.com/daxian-w/codex-huds/blob/main/config/settings.default.json)。
 
 | 字段 | 可选值 / 默认值 |
 |---|---|
@@ -101,12 +110,12 @@
 | 额度为空 / 登录失效 | 使用 ChatGPT 账号重新登录，再点击托盘菜单的「立即刷新」。 |
 | 悬浮条未显示或位置不正确 | 确认监视器正在运行、吸附目标窗口可见，并在外观设置中调整位置。 |
 
-仍有问题时，请[提交 issue](https://github.com/D1NOOO/codex-usage-monitor/issues) 并附上隐藏隐私信息的截图。
+仍有问题时，请[提交 issue](https://github.com/daxian-w/codex-huds/issues) 并附上隐藏隐私信息的截图。
 
 ## 构建与发布
 
 ```powershell
-git clone https://github.com/D1NOOO/codex-usage-monitor.git
+git clone https://github.com/daxian-w/codex-huds.git
 cd codex-usage-monitor
 .\scripts\verify.ps1
 .\scripts\build.ps1 -Package

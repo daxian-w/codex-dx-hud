@@ -322,15 +322,28 @@ internal static class UsageRefreshTest
         object settingsCopy=Call(olderSettings,"Clone");
         Check((int)Get(olderSettings,"ForegroundRefreshSeconds")==45 && (int)Get(settingsCopy,"ForegroundRefreshSeconds")==45,"foreground interval normalizes and survives cloning");
         object overlay=Activator.CreateInstance(overlayType,new[]{settings});
+        // Match MonitorContext's HWND initialization before exercising Ui.
+        IntPtr overlayHandle=((Control)overlay).Handle;
         object client=Activator.CreateInstance(assembly.GetType("CodexRateMonitorNative.AppServerClient",true),true);
         var tray=new NotifyIcon();
+        string taskRoot=Path.Combine(logDirectory,"task-lifecycle");
+        string taskFolder=Path.Combine(taskRoot,DateTime.UtcNow.ToString("yyyy/MM/dd"));Directory.CreateDirectory(taskFolder);
+        string taskPath=Path.Combine(taskFolder,"fixture.jsonl");
+        File.WriteAllText(taskPath,"{\"type\":\"session_meta\",\"payload\":{\"id\":\"fixture\",\"originator\":\"Codex Desktop\",\"source\":\"vscode\"}}\n"+
+            TaskEvent("task_started","original"),new UTF8Encoding(false));
+        object tasks=Activator.CreateInstance(assembly.GetType("CodexRateMonitorNative.TaskStatusProvider",true),new object[]{taskRoot});
         try {
             Field(context,"overlay",overlay);Field(context,"settings",settings);Field(context,"trayIcon",tray);Field(context,"appServer",client);
+            Field(context,"taskProvider",tasks);
             Field(context,"refreshScheduler",Activator.CreateInstance(assembly.GetType("CodexRateMonitorNative.UsageRefreshScheduler",true),true));
             object stabilizer=Activator.CreateInstance(assembly.GetType("CodexRateMonitorNative.RateSnapshotStabilizer",true),true);
             Field(context,"snapshotStabilizer",stabilizer);
             object account=Activator.CreateInstance(accountType,true);Set(account,"Fingerprint","first");Set(account,"CanReadQuota",true);
             Call(context,"OnAccountObserved",account,0);
+            object taskState=Call(tasks,"ReadSnapshot",DateTime.UtcNow,5);
+            Check((string)Get(taskState,"State")=="running","first verified account preserves pre-existing task start");
+            Call(context,"OnTaskSnapshotReceived",taskState);
+            Check((int?)Get(Field(overlay,"taskSnapshot"),"ActiveCount")==1,"production task handler displays verified local task count");
             object snapshot=Activator.CreateInstance(snapshotType,true);object window=Activator.CreateInstance(windowType,true);
             Set(snapshot,"NotificationId",1);
             Set(window,"UsedPercent",80d);Set(window,"ResetsAt",DateTimeOffset.UtcNow.AddHours(2).ToUnixTimeSeconds());Set(snapshot,"Primary",window);
@@ -346,6 +359,14 @@ internal static class UsageRefreshTest
             double monotonic=Stopwatch.GetTimestamp()/(double)Stopwatch.Frequency;
             Check(!(bool)Call(scheduler,"ShouldRead",monotonic,30) && (bool)Call(scheduler,"ShouldRead",monotonic+1.1,30),"suspicious data queues one confirmation through scheduler");
             Set(account,"Fingerprint","second");Call(context,"OnAccountObserved",account,0);
+            taskState=Call(tasks,"ReadSnapshot",DateTime.UtcNow,5);
+            Check((string)Get(taskState,"Coverage")=="unavailable","real account switch discards old task lifecycle");
+            File.AppendAllText(taskPath,TaskEvent("item_completed","original"),new UTF8Encoding(false));
+            taskState=Call(tasks,"ReadSnapshot",DateTime.UtcNow,5);
+            Check((string)Get(taskState,"Coverage")=="unavailable","new activity cannot resurrect previous-account task");
+            File.AppendAllText(taskPath,TaskEvent("task_started","second-turn"),new UTF8Encoding(false));
+            taskState=Call(tasks,"ReadSnapshot",DateTime.UtcNow,5);
+            Check((string)Get(taskState,"State")=="running","new-account task start recovers observation");
             Check(Field(context,"lastSnapshot")==null && Field(context,"lastSnapshotAt").Equals(DateTime.MinValue) &&
                 Field(overlay,"snapshot")==null && Field(stabilizer,"accepted")==null,"account switch clears quota, timestamp and stabilizer");
             Set(window,"UsedPercent",5d);Call(context,"OnSnapshotReceived",snapshot,0);
@@ -353,7 +374,28 @@ internal static class UsageRefreshTest
             int oldEpoch=(int)Field(context,"accountEpoch");
             Call(context,"OnAccountUpdated",0);
             Check((int)Field(context,"accountEpoch")>oldEpoch && Field(context,"lastSnapshot")==null,"account notification invalidates data and asynchronous credit epoch");
+            taskState=Call(tasks,"ReadSnapshot",DateTime.UtcNow,5);
+            Call(context,"OnTaskSnapshotReceived",taskState);
+            Check((string)Get(Field(overlay,"taskSnapshot"),"State")=="loading","task callback is hidden while account verification is pending");
+            Call(context,"OnAccountUpdated",0);
             Call(context,"OnAccountObserved",account,0);
+            taskState=Call(tasks,"ReadSnapshot",DateTime.UtcNow,5);
+            Check((string)Get(taskState,"State")=="running","duplicate same-account notifications do not erase active task");
+            Call(context,"OnTaskSnapshotReceived",taskState);
+            Check((int?)Get(Field(overlay,"taskSnapshot"),"ActiveCount")==1,"same-account confirmation restores visible task count");
+            Set(taskState,"AccountEpoch",(int)Field(context,"accountEpoch")-1);
+            object acceptedTask=Field(overlay,"taskSnapshot");
+            Call(context,"OnTaskSnapshotReceived",taskState);
+            Check(object.ReferenceEquals(acceptedTask,Field(overlay,"taskSnapshot")),"old task epoch cannot overwrite current display");
+            Set(taskState,"AccountEpoch",(int)Field(context,"accountEpoch"));
+            Field(context,"authFailures",1);Call(context,"OnTaskSnapshotReceived",taskState);
+            Check(object.ReferenceEquals(acceptedTask,Field(overlay,"taskSnapshot")),"task publication is blocked during authentication failures");
+            Field(context,"authFailures",0);
+            Field(context,"authResyncAttempted",true);Call(context,"OnTaskSnapshotReceived",taskState);
+            Check(object.ReferenceEquals(acceptedTask,Field(overlay,"taskSnapshot")),"task publication is blocked until authentication recovery completes");
+            Field(context,"authResyncAttempted",false);
+            Call(context,"OnTaskSnapshotReceived",taskState);
+            Check(!object.ReferenceEquals(acceptedTask,Field(overlay,"taskSnapshot")),"task publication resumes after same-account authentication recovery");
             Call(context,"OnSnapshotReceived",snapshot,0);
             DateTime beforeFailure=(DateTime)Field(context,"lastSnapshotAt");
             Field(context,"refreshFailed",true);Call(context,"UpdateTrayText");
@@ -394,7 +436,18 @@ internal static class UsageRefreshTest
             Set(account,"ReadRequestId",0);
             Set(account,"CanReadQuota",false);Set(account,"StatusKey","NotSignedIn");Call(context,"OnAccountObserved",account,0);
             Check((bool)Field(context,"authDead") && (double)Field(context,"authProbeNotBefore")>monotonic+299 && Field(context,"lastSnapshot")==null,"signed-out context clears display and enforces slow recovery probes");
-        } finally { tray.Dispose();((IDisposable)overlay).Dispose();((IDisposable)client).Dispose(); }
+            taskState=Call(tasks,"ReadSnapshot",DateTime.UtcNow,5);
+            Check((string)Get(taskState,"Coverage")=="unavailable","sign-out removes previously observed task history");
+            Field(context,"authDead",false);Set(account,"CanReadQuota",true);
+            Call(context,"OnAccountUpdated",0);Set(account,"Fingerprint","third");Call(context,"OnAccountObserved",account,0);
+            File.AppendAllText(taskPath,TaskEvent("item_completed","second-turn"),new UTF8Encoding(false));
+            taskState=Call(tasks,"ReadSnapshot",DateTime.UtcNow,5);
+            Check((string)Get(taskState,"Coverage")=="unavailable","verified switch after notification cannot reuse previous-account activity");
+        } finally { ((IDisposable)tasks).Dispose();tray.Dispose();((IDisposable)overlay).Dispose();((IDisposable)client).Dispose(); }
+    }
+    private static string TaskEvent(string kind,string turn) {
+        return Json.Serialize(new Dictionary<string,object>{{"timestamp",DateTime.UtcNow.ToString("o")},{"type","event_msg"},
+            {"payload",new Dictionary<string,object>{{"type",kind},{"turn_id",turn}}}})+"\n";
     }
     private static void DiagnosticTests(Assembly assembly) {
         string history=string.Join("\n",Directory.GetFiles(logDirectory,"usage-*.log").Select(File.ReadAllText));
