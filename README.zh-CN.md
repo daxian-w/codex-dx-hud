@@ -10,6 +10,10 @@
 
 > 非官方社区项目，与 OpenAI 无隶属关系。依赖实验性的本地 `codex app-server` 协议。
 
+## 原项目与二次开发说明
+
+本仓库是基于原始项目 [D1NOOO/codex-usage-monitor](https://github.com/D1NOOO/codex-usage-monitor) 的二次开发版本。原项目采用 [MIT License](https://github.com/D1NOOO/codex-usage-monitor/blob/main/LICENSE)，本仓库继续遵守该协议并保留原作者来源说明。`daxian-w/codex-huds` 主要新增奶油玻璃悬浮 HUD、悬停展开、尺寸与皮肤选项、任务状态处理、重置时间显示、统一设置/托盘视觉、诊断日志和回归测试。完整说明见[开源发布说明](docs/OPEN-SOURCE-RELEASE.md)。
+
 ## 主要功能
 
 - **额度一目了然**：显示 5 小时、7 天额度及剩余或已用比例，支持自动、全部显示和仅周用量面板。

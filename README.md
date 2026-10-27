@@ -10,6 +10,10 @@ A lightweight Windows tray app for Codex quota, reset times and reset credits, w
 
 > Unofficial community project, not affiliated with OpenAI. Uses the experimental local `codex app-server` protocol.
 
+## Original project and derivative notice
+
+This repository is a derivative work based on the original [D1NOOO/codex-usage-monitor](https://github.com/D1NOOO/codex-usage-monitor) project. The original project is licensed under the [MIT License](https://github.com/D1NOOO/codex-usage-monitor/blob/main/LICENSE); this repository keeps that license and the original attribution. The `daxian-w/codex-huds` repository adds the glass HUD, hover expansion, size and skin options, task-status handling, reset-time display, unified settings/tray styling, diagnostics and regression tests. See the full [open-source release notes](docs/OPEN-SOURCE-RELEASE.md).
+
 ## Features
 
 - **Usage at a glance**: 5-hour and 7-day quotas, remaining or used percentages, and Auto / Show all / Weekly usage only panels.
